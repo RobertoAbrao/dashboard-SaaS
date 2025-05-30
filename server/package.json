@@ -1,0 +1,20 @@
+
+{
+  "name": "whatsapp-bot-server",
+  "version": "1.0.0",
+  "description": "Backend server for WhatsApp Bot SAAS",
+  "main": "whatsapp-server.js",
+  "scripts": {
+    "start": "node whatsapp-server.js",
+    "dev": "nodemon whatsapp-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode": "^1.5.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
