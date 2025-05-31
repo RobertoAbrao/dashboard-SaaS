@@ -41,15 +41,21 @@ npm install && npm run build && cd server && npm install && npm start
 ## O que acontece:
 1. O servidor Express roda na porta 3001
 2. Ele serve o frontend React buildado
-3. As APIs do WhatsApp estão no mesmo servidor
+3. As APIs do WhatsApp estão no mesmo servidor usando Baileys
 4. Não há problemas de CORS
 5. O QR Code aparece automaticamente quando o bot inicializa
 
+## Sobre o Baileys:
+- Biblioteca mais moderna e estável que whatsapp-web.js
+- Não precisa do Chrome/Puppeteer
+- Reconexão automática mais robusta
+- Melhor performance
+
 ## Logs importantes:
 - "Servidor rodando na porta 3001" - servidor iniciado
-- "Inicializando cliente WhatsApp..." - bot inicializando
+- "Inicializando cliente WhatsApp com Baileys..." - bot inicializando
 - "QR Code recebido" - QR gerado
 - "QR Code gerado com sucesso" - QR pronto para escaneamento
-- "Cliente WhatsApp pronto!" - bot conectado
+- "Cliente WhatsApp conectado com sucesso!" - bot conectado
 
 Se algo der errado, pare o servidor (Ctrl+C) e rode novamente `npm start` na pasta server.

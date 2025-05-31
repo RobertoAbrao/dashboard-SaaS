@@ -1,7 +1,7 @@
 
 # WhatsApp Bot Server
 
-Backend server para o WhatsApp Bot SAAS usando whatsapp-web.js.
+Backend server para o WhatsApp Bot SAAS usando Baileys.
 
 ## Instalação
 
@@ -39,12 +39,20 @@ O servidor será executado na porta 3001.
 
 ## Funcionamento
 
-1. O servidor inicializa automaticamente o cliente WhatsApp
+1. O servidor inicializa automaticamente o cliente WhatsApp com Baileys
 2. Gera QR Code quando necessário
 3. Envia atualizações em tempo real via SSE
-4. Mantém sessão autenticada usando LocalAuth
+4. Mantém sessão autenticada usando multi-file auth
+
+## Vantagens do Baileys
+
+- Mais estável e eficiente que whatsapp-web.js
+- Não depende de Puppeteer/Chrome
+- Suporte nativo para multi-device
+- Melhor performance e menor uso de recursos
+- Reconexão automática mais robusta
 
 ## Requisitos
 
 - Node.js 16+
-- Chrome/Chromium instalado no sistema
+- Conexão estável com internet
