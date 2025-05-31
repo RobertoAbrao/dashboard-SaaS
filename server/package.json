@@ -10,10 +10,11 @@
     "build": "cd .. && npm run build && cd server && npm start"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "whatsapp-web.js": "^1.23.0",
-    "qrcode": "^1.5.3"
+    "@whiskeysockets/baileys": "^6.7.2", 
+    "express": "^4.19.2", 
+    "http": "^0.0.1-security", 
+    "qrcode-terminal": "^0.12.0", 
+    "socket.io": "^4.7.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
