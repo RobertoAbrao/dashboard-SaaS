@@ -1,21 +1,19 @@
-
 {
-  "name": "whatsapp-bot-server",
+  "name": "whatsapp-baileys-server",
   "version": "1.0.0",
-  "description": "Backend server para o WhatsApp Bot SAAS",
+  "description": "Servidor WhatsApp com Baileys e Socket.IO",
   "main": "whatsapp-server.js",
   "scripts": {
     "start": "node whatsapp-server.js",
-    "dev": "nodemon whatsapp-server.js",
-    "build": "cd .. && npm run build && cd server && npm start"
+    "dev": "nodemon whatsapp-server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "@whiskeysockets/baileys": "^6.7.8",
-    "qrcode": "^1.5.3"
+    "@whiskeysockets/baileys": "^6.7.2",
+    "express": "^4.19.2",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.7.5"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.1.4"
   }
 }
