@@ -21,33 +21,36 @@ export const useWhatsAppConnection = () => {
       eventSourceRef.current.close();
     }
 
-    const eventSource = new EventSource('http://localhost:3001/api/whatsapp/events');
+    console.log('Conectando ao SSE...');
+    const eventSource = new EventSource('/api/whatsapp/events');
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
-      console.log('SSE connection opened');
+      console.log('Conexão SSE aberta');
       setIsConnecting(false);
     };
 
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.log('Dados SSE recebidos:', data);
         setConnectionData(data);
       } catch (error) {
-        console.error('Error parsing SSE data:', error);
+        console.error('Erro ao analisar dados SSE:', error);
       }
     };
 
     eventSource.onerror = (error) => {
-      console.error('SSE error:', error);
+      console.error('Erro SSE:', error);
       setIsConnecting(false);
       
-      // Reconnect after 5 seconds
+      // Reconectar após 3 segundos
       setTimeout(() => {
         if (eventSourceRef.current?.readyState === EventSource.CLOSED) {
+          console.log('Tentando reconectar SSE...');
           connectToSSE();
         }
-      }, 5000);
+      }, 3000);
     };
   };
 
@@ -65,7 +68,9 @@ export const useWhatsAppConnection = () => {
   const restartConnection = async () => {
     try {
       setIsConnecting(true);
-      const response = await fetch('http://localhost:3001/api/whatsapp/restart', {
+      console.log('Reiniciando conexão...');
+      
+      const response = await fetch('/api/whatsapp/restart', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -73,20 +78,20 @@ export const useWhatsAppConnection = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to restart connection');
+        throw new Error('Falha ao reiniciar conexão');
       }
 
       const result = await response.json();
       console.log(result.message);
     } catch (error) {
-      console.error('Error restarting connection:', error);
+      console.error('Erro ao reiniciar conexão:', error);
       setIsConnecting(false);
     }
   };
 
   const sendMessage = async (number: string, message: string) => {
     try {
-      const response = await fetch('http://localhost:3001/api/whatsapp/send-message', {
+      const response = await fetch('/api/whatsapp/send-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -95,12 +100,12 @@ export const useWhatsAppConnection = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to send message');
+        throw new Error('Falha ao enviar mensagem');
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Erro ao enviar mensagem:', error);
       throw error;
     }
   };
