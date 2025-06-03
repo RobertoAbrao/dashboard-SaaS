@@ -29,7 +29,7 @@
 3. **Instale as dependências**
 
    ```bash
-   npm install
+   npm install && npm run build
    ```
 
 4. **Inicie o servidor de desenvolvimento**
@@ -39,6 +39,8 @@
    ```
 
 > Requisitos: [Node.js e npm instalados com nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+
+Obs.: Leia o arquivo EXECUTAR.md para mais detalhes.
 
 ---
 
