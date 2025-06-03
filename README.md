@@ -81,13 +81,9 @@
 
 **Tarefas:**
 
-* 🤖 Conexão com WhatsApp (Baileys)
+* 🤖 Conexão com WhatsApp (Baileys)  
 
-  *
-
-* 📊 Dashboard com dados ao vivo
-
-  *
+* 📊 Dashboard com dados ao vivo  
 
 * 💬 Envio de mensagens com feedback
 
