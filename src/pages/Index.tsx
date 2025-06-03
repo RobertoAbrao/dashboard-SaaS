@@ -1,44 +1,77 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+// src/pages/Index.tsx
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'; // CardDescription adicionada de volta
+import { Button } from '@/components/ui/button'; // <<< --- ADICIONADO AQUI
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3 } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
 import Dashboard from '@/components/Dashboard';
-import { useWhatsAppConnection } from '@/hooks/useWhatsAppConnection';
+import { useWhatsAppConnection, DashboardData } from '@/hooks/useWhatsAppConnection';
 
 const Index = () => {
-  const { status } = useWhatsAppConnection();
+  const { status: currentStatus, dashboardData, message: hookMessage } = useWhatsAppConnection();
+
+  const botDisplayStatus = dashboardData.botStatus || currentStatus;
+
+  const getStatusValue = (statusValue: typeof botDisplayStatus) => {
+    switch (statusValue) {
+      case 'online': return 'Online';
+      case 'qr_ready': return 'Aguardando QR';
+      case 'initializing':
+      case 'socket_connected':
+      case 'connecting_socket':
+      case 'authenticated': return 'Conectando';
+      case 'auth_failed': return 'Falha';
+      case 'disconnected_whatsapp': return 'Desconectado';
+      default: return 'Offline';
+    }
+  };
+
+  const getStatusColors = (statusValue: typeof botDisplayStatus) => {
+    switch (statusValue) {
+      case 'online': return { color: 'text-green-600', bgColor: 'bg-green-50' };
+      case 'qr_ready': return { color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
+      case 'initializing':
+      case 'socket_connected':
+      case 'connecting_socket':
+      case 'authenticated': return { color: 'text-blue-600', bgColor: 'bg-blue-50' };
+      case 'auth_failed':
+      case 'disconnected_whatsapp': return { color: 'text-red-600', bgColor: 'bg-red-50' };
+      default: return { color: 'text-gray-600', bgColor: 'bg-gray-50' };
+    }
+  };
+  
+  const statusColors = getStatusColors(botDisplayStatus);
 
   const stats = [
     {
       title: "Status do Bot",
-      value: status === 'online' ? 'Online' : status === 'qr_ready' ? 'Aguardando' : 'Offline',
+      value: getStatusValue(botDisplayStatus),
       icon: Activity,
-      color: status === 'online' ? 'text-green-600' : status === 'qr_ready' ? 'text-yellow-600' : 'text-red-600',
-      bgColor: status === 'online' ? 'bg-green-50' : status === 'qr_ready' ? 'bg-yellow-50' : 'bg-red-50'
+      color: statusColors.color,
+      bgColor: statusColors.bgColor,
     },
     {
-      title: "Mensagens Enviadas",
-      value: "0", // Will be implemented later
+      title: "Mensagens Enviadas Hoje",
+      value: dashboardData.messagesSent.toString(),
       icon: MessageCircle,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50'
     },
     {
       title: "Conexões Ativas",
-      value: status === 'online' ? "1" : "0",
+      value: dashboardData.connections.toString(),
       icon: Users,
       color: 'text-purple-600',
       bgColor: 'bg-purple-50'
     },
     {
-      title: "Uptime",
-      value: "98.5%",
+      title: "Uptime (Placeholder)",
+      value: "99.9%", 
       icon: BarChart3,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50'
+      color: 'text-indigo-600',
+      bgColor: 'bg-indigo-50'
     }
   ];
 
@@ -106,9 +139,10 @@ const Index = () => {
 
           <TabsContent value="dashboard">
             <Dashboard 
-              messagesSent={0}
-              connections={status === 'online' ? 1 : 0}
-              botStatus={status === 'online' ? 'online' : 'offline'}
+              messagesSent={dashboardData.messagesSent}
+              connections={dashboardData.connections}
+              botStatus={dashboardData.botStatus}
+              recentActivityData={dashboardData.recentActivity}
             />
           </TabsContent>
 
@@ -119,7 +153,7 @@ const Index = () => {
           <TabsContent value="messages">
             <MessageSender 
               onMessageSent={() => {}}
-              botStatus={status === 'online' ? 'online' : 'offline'}
+              botStatus={botDisplayStatus as 'online' | 'offline'}
             />
           </TabsContent>
 
@@ -130,7 +164,7 @@ const Index = () => {
                   <Settings className="h-5 w-5" />
                   <span>Configurações do Bot</span>
                 </CardTitle>
-                <CardDescription>
+                <CardDescription> {/* Adicionada CardDescription de volta */}
                   Configure as opções do seu bot WhatsApp
                 </CardDescription>
               </CardHeader>
@@ -176,7 +210,7 @@ const Index = () => {
                   </div>
                 </div>
                 <div className="flex justify-end pt-4">
-                  <Button className="bg-green-600 hover:bg-green-700">
+                  <Button className="bg-green-600 hover:bg-green-700"> {/* Esta é a linha 214 aproximada */}
                     Salvar Configurações
                   </Button>
                 </div>
