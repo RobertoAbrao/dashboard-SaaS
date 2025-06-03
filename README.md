@@ -1,19 +1,3 @@
-# Welcome to your Lovable project
-
-## Project info
-
-**URL**: https://lovable.dev/projects/eed4f1d3-d86e-49a4-a76d-a67458f78be2
-
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/eed4f1d3-d86e-49a4-a76d-a67458f78be2) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
 **Use your preferred IDE**
 
 If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
@@ -60,14 +44,101 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
-## How can I deploy this project?
+🗺️ Roadmap Visual do Projeto: WhatsApp Bot SAAS
+Visão Geral das Fases
+Fase 🏁	Objetivo Principal 🎯	Foco Principal 💡
+1: Alicerce	Bot funcional com dashboard básico em tempo real (MVP).	Conexão Baileys estável, Dashboard com dados live, Envio de mensagens.
+2: Expansão	Persistência de dados, estatísticas avançadas e configurações.	Banco de Dados/Redis, Gráficos históricos, Configurações do bot.
+3: Produção	Refinamento, segurança e prontidão para implantação na VPS.	Autenticação, UI/UX, Docker, Preparação da VPS.
+4: SaaS & Escale	Recursos para modelo SaaS e capacidade de crescimento.	Multi-tenancy (se aplicável), Funcionalidades avançadas do bot, Escalabilidade.
+5: Sustentar	Manutenção contínua e evolução do produto.	Monitoramento, Correções, Novas features.
 
-Simply open [Lovable](https://lovable.dev/projects/eed4f1d3-d86e-49a4-a76d-a67458f78be2) and click on Share -> Publish.
+Exportar para as Planilhas
+Detalhamento das Fases
+Fase 1: Alicerce 🏗️ - Funcionalidade Essencial (MVP)
+Objetivo: 🎯 Ter um bot funcional com um dashboard que exibe informações em tempo real e permite operações básicas.
 
-## Can I connect a custom domain to my Lovable project?
+Principais Entregáveis & Tarefas:
 
-Yes, you can!
+🤖 Conexão Estável com WhatsApp (Baileys):
+[ ] Garantir robustez na conexão e reconexão.
+[ ] Feedback claro de status da conexão no frontend.
+📊 Dashboard com Dados em Tempo Real:
+Backend:
+[ ] Emitir status real do bot.
+[ ] Emitir contador de mensagens enviadas.
+[ ] Emitir log de atividades recentes.
+Frontend:
+[ ] useWhatsAppConnection.ts para gerenciar dados.
+Dashboard.tsx e Index.tsx para exibir dados dinâmicos.
+💬 Funcionalidade de Envio de Mensagens:
+[ ] Garantir funcionamento e feedback adequado.
+📱 Gerenciamento de QR Code:
+[ ] Assegurar exibição e renovação operacional.
+⚠️ Tratamento Básico de Erros:
+[ ] Mensagens de erro claras no frontend.
+Fase 2: Expansão 📈 - Persistência e Estatísticas Avançadas
+Objetivo: 🎯 Armazenar dados importantes para análise histórica e implementar funcionalidades de configuração.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+Principais Entregáveis & Tarefas:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+💾 Implementar Persistência de Dados (Backend):
+[ ] Escolher e implementar tecnologia (Redis para contadores/cache; SQLite/PostgreSQL para dados históricos).
+[ ] Persistir contadores e logs de atividades.
+📈 Dashboard com Gráficos Funcionais e Históricos:
+[ ] Backend: Coletar e agregar dados para gráficos (mensagens por hora/dia, etc.).
+[ ] Frontend: Dashboard.tsx para consumir e exibir dados agregados nos gráficos.
+⚙️ Configurações do Bot:
+[ ] Backend: Definir e armazenar configurações (webhook, timeouts, etc.).
+[ ] Frontend: Interface para visualizar e salvar configurações na aba "Configurações".
+Fase 3: Produção 🚀 - Refinamento, Segurança e Implantação
+Objetivo: 🎯 Refinar o produto, adicionar segurança e prepará-lo para ser hospedado na VPS.
+
+Principais Entregáveis & Tarefas:
+
+🔒 Autenticação e Autorização:
+[ ] Implementar sistema de login (se necessário para proteger o dashboard).
+🎨 Melhorias de UI/UX:
+[ ] Refinar interface e usabilidade.
+[ ] Adicionar mais feedback visual.
+🛠️ Tratamento Avançado de Erros e Logs:
+[ ] Logging detalhado e estruturado no backend.
+[ ] Aumentar resiliência do bot.
+🐳 Dockerização (Recomendado):
+[ ] Dockerfile para o backend.
+[ ] docker-compose.yml para orquestrar backend, frontend (se aplicável) e Redis.
+🌐 Configuração do Ambiente de Produção (VPS Hostinger):
+[ ] Instalar dependências (Node.js, Redis, Nginx).
+[ ] Configurar domínio, SSL/TLS, firewall.
+[ ] Variáveis de ambiente para produção.
+🧪 Testes:
+[ ] Testes funcionais das principais features.
+Fase 4: SaaS & Escale ☁️ - Recursos para Modelo SaaS e Crescimento
+Objetivo: 🎯 Expandir as funcionalidades para um modelo SaaS e garantir que a arquitetura possa escalar.
+
+Principais Entregáveis & Tarefas:
+
+👥 Gerenciamento de Múltiplos Clientes/Instâncias (Opcional):
+[ ] Arquitetar para multi-tenancy (se for o objetivo do SaaS).
+✨ Recursos Avançados do Bot:
+[ ] Respostas automáticas configuráveis.
+[ ] Agendamento de mensagens.
+[ ] Integrações com outras APIs.
+💳 Planos de Assinatura e Pagamento (Opcional):
+[ ] Integração com gateway de pagamento.
+[ ] Gerenciamento de planos e acesso a features.
+⚖️ Escalabilidade do Backend:
+[ ] Estratégias para balanceamento de carga, múltiplas instâncias, etc.
+📡 Monitoramento e Alertas em Produção:
+[ ] Ferramentas de monitoramento de performance, erros e uso.
+[ ] Configuração de alertas críticos.
+Fase 5: Sustentar 🌱 - Manutenção e Evolução Contínua
+Objetivo: 🎯 Manter o sistema saudável e adicionar novas funcionalidades com base no feedback e nas necessidades do mercado.
+
+Tarefas Contínuas:
+
+[ ] 🩺 Monitoramento constante.
+[ ] 🐛 Correção de bugs.
+[ ] 🔄 Atualização de dependências.
+[ ] 💡 Desenvolvimento de novas funcionalidades.
+[ ] ⚡ Otimizações de performance.
