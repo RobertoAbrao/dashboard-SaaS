@@ -1,144 +1,151 @@
-**Use your preferred IDE**
+# WhatsApp Bot SaaS
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## 📦 Tecnologias Utilizadas
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+* **Vite**
+* **TypeScript**
+* **React**
+* **Tailwind CSS**
+* **shadcn-ui**
 
-Follow these steps:
+---
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## 🚀 Iniciando o Projeto
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### 💻 Usando sua IDE local
 
-# Step 3: Install the necessary dependencies.
-npm i
+1. **Clone o repositório**
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+   ```bash
+   git clone <YOUR_GIT_URL>
+   ```
 
-**Edit a file directly in GitHub**
+2. **Acesse o diretório do projeto**
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+   ```bash
+   cd <YOUR_PROJECT_NAME>
+   ```
 
-**Use GitHub Codespaces**
+3. **Instale as dependências**
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+   ```bash
+   npm install
+   ```
 
-## What technologies are used for this project?
+4. **Inicie o servidor de desenvolvimento**
 
-This project is built with:
+   ```bash
+   npm run dev
+   ```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+> Requisitos: [Node.js e npm instalados com nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
-🗺️ Roadmap Visual do Projeto: WhatsApp Bot SAAS
-Visão Geral das Fases
-Fase 🏁	Objetivo Principal 🎯	Foco Principal 💡
-1: Alicerce	Bot funcional com dashboard básico em tempo real (MVP).	Conexão Baileys estável, Dashboard com dados live, Envio de mensagens.
-2: Expansão	Persistência de dados, estatísticas avançadas e configurações.	Banco de Dados/Redis, Gráficos históricos, Configurações do bot.
-3: Produção	Refinamento, segurança e prontidão para implantação na VPS.	Autenticação, UI/UX, Docker, Preparação da VPS.
-4: SaaS & Escale	Recursos para modelo SaaS e capacidade de crescimento.	Multi-tenancy (se aplicável), Funcionalidades avançadas do bot, Escalabilidade.
-5: Sustentar	Manutenção contínua e evolução do produto.	Monitoramento, Correções, Novas features.
+---
 
-Exportar para as Planilhas
-Detalhamento das Fases
-Fase 1: Alicerce 🏗️ - Funcionalidade Essencial (MVP)
-Objetivo: 🎯 Ter um bot funcional com um dashboard que exibe informações em tempo real e permite operações básicas.
+### ✏️ Editando diretamente no GitHub
 
-Principais Entregáveis & Tarefas:
+1. Acesse o arquivo desejado no repositório.
+2. Clique no ícone de lápis (“Edit”).
+3. Faça suas alterações e clique em “Commit changes”.
 
-🤖 Conexão Estável com WhatsApp (Baileys):
-[ ] Garantir robustez na conexão e reconexão.
-[ ] Feedback claro de status da conexão no frontend.
-📊 Dashboard com Dados em Tempo Real:
-Backend:
-[ ] Emitir status real do bot.
-[ ] Emitir contador de mensagens enviadas.
-[ ] Emitir log de atividades recentes.
-Frontend:
-[ ] useWhatsAppConnection.ts para gerenciar dados.
-Dashboard.tsx e Index.tsx para exibir dados dinâmicos.
-💬 Funcionalidade de Envio de Mensagens:
-[ ] Garantir funcionamento e feedback adequado.
-📱 Gerenciamento de QR Code:
-[ ] Assegurar exibição e renovação operacional.
-⚠️ Tratamento Básico de Erros:
-[ ] Mensagens de erro claras no frontend.
-Fase 2: Expansão 📈 - Persistência e Estatísticas Avançadas
-Objetivo: 🎯 Armazenar dados importantes para análise histórica e implementar funcionalidades de configuração.
+---
 
-Principais Entregáveis & Tarefas:
+### 🧪 Usando GitHub Codespaces
 
-💾 Implementar Persistência de Dados (Backend):
-[ ] Escolher e implementar tecnologia (Redis para contadores/cache; SQLite/PostgreSQL para dados históricos).
-[ ] Persistir contadores e logs de atividades.
-📈 Dashboard com Gráficos Funcionais e Históricos:
-[ ] Backend: Coletar e agregar dados para gráficos (mensagens por hora/dia, etc.).
-[ ] Frontend: Dashboard.tsx para consumir e exibir dados agregados nos gráficos.
-⚙️ Configurações do Bot:
-[ ] Backend: Definir e armazenar configurações (webhook, timeouts, etc.).
-[ ] Frontend: Interface para visualizar e salvar configurações na aba "Configurações".
-Fase 3: Produção 🚀 - Refinamento, Segurança e Implantação
-Objetivo: 🎯 Refinar o produto, adicionar segurança e prepará-lo para ser hospedado na VPS.
+1. Acesse a página principal do repositório.
+2. Clique no botão verde “Code”.
+3. Va para a aba **Codespaces**.
+4. Clique em “New codespace”.
 
-Principais Entregáveis & Tarefas:
+---
 
-🔒 Autenticação e Autorização:
-[ ] Implementar sistema de login (se necessário para proteger o dashboard).
-🎨 Melhorias de UI/UX:
-[ ] Refinar interface e usabilidade.
-[ ] Adicionar mais feedback visual.
-🛠️ Tratamento Avançado de Erros e Logs:
-[ ] Logging detalhado e estruturado no backend.
-[ ] Aumentar resiliência do bot.
-🐳 Dockerização (Recomendado):
-[ ] Dockerfile para o backend.
-[ ] docker-compose.yml para orquestrar backend, frontend (se aplicável) e Redis.
-🌐 Configuração do Ambiente de Produção (VPS Hostinger):
-[ ] Instalar dependências (Node.js, Redis, Nginx).
-[ ] Configurar domínio, SSL/TLS, firewall.
-[ ] Variáveis de ambiente para produção.
-🧪 Testes:
-[ ] Testes funcionais das principais features.
-Fase 4: SaaS & Escale ☁️ - Recursos para Modelo SaaS e Crescimento
-Objetivo: 🎯 Expandir as funcionalidades para um modelo SaaS e garantir que a arquitetura possa escalar.
+## 📺 Roadmap do Projeto
 
-Principais Entregáveis & Tarefas:
+### Visão Geral por Fases
 
-👥 Gerenciamento de Múltiplos Clientes/Instâncias (Opcional):
-[ ] Arquitetar para multi-tenancy (se for o objetivo do SaaS).
-✨ Recursos Avançados do Bot:
-[ ] Respostas automáticas configuráveis.
-[ ] Agendamento de mensagens.
-[ ] Integrações com outras APIs.
-💳 Planos de Assinatura e Pagamento (Opcional):
-[ ] Integração com gateway de pagamento.
-[ ] Gerenciamento de planos e acesso a features.
-⚖️ Escalabilidade do Backend:
-[ ] Estratégias para balanceamento de carga, múltiplas instâncias, etc.
-📡 Monitoramento e Alertas em Produção:
-[ ] Ferramentas de monitoramento de performance, erros e uso.
-[ ] Configuração de alertas críticos.
-Fase 5: Sustentar 🌱 - Manutenção e Evolução Contínua
-Objetivo: 🎯 Manter o sistema saudável e adicionar novas funcionalidades com base no feedback e nas necessidades do mercado.
+| Fase            | Objetivo Principal                      | Foco Técnico                             |
+| --------------- | --------------------------------------- | ---------------------------------------- |
+| 1. Alicerce 🗷️ | Bot funcional + Dashboard ao vivo (MVP) | Baileys, WebSocket, QR Code, UI base     |
+| 2. Expansão 📈  | Dados persistentes + Estatísticas       | Redis/PostgreSQL, Gráficos, Configs      |
+| 3. Produção 🚀  | Segurança + Deploy VPS                  | Docker, Autenticação, SSL, VPS           |
+| 4. SaaS ☁️      | Multiusuário + Recursos Premium         | Multi-tenant, pagamentos, escalabilidade |
+| 5. Sustentar 🌱 | Manutenção e evolução contínua          | Monitoramento, Correções, Novas features |
 
-Tarefas Contínuas:
+---
 
-[ ] 🩺 Monitoramento constante.
-[ ] 🐛 Correção de bugs.
-[ ] 🔄 Atualização de dependências.
-[ ] 💡 Desenvolvimento de novas funcionalidades.
-[ ] ⚡ Otimizações de performance.
+## 📌 Detalhamento das Fases
+
+### ✅ Fase 1: Alicerce
+
+**Objetivo:** Ter um bot funcional com dashboard em tempo real.
+
+**Tarefas:**
+
+* 🤖 Conexão com WhatsApp (Baileys)
+
+  *
+
+* 📊 Dashboard com dados ao vivo
+
+  *
+
+* 💬 Envio de mensagens com feedback
+
+* 📱 QR Code funcional e renovável
+
+* ⚠️ Tratamento básico de erros
+
+---
+
+### 📈 Fase 2: Expansão
+
+**Objetivo:** Armazenar dados históricos e permitir configurações.
+
+**Tarefas:**
+
+* 💾 Persistência (Redis e banco relacional)
+* 📊 Gráficos no dashboard
+* ⚙️ Aba de configurações
+
+---
+
+### 🚀 Fase 3: Produção
+
+**Objetivo:** Pronto para produção com segurança.
+
+**Tarefas:**
+
+* 🔒 Autenticação no dashboard
+* 🎨 UX refinado e responsivo
+* 💠 Logs detalhados
+* 🐳 Docker + docker-compose
+* 🌐 VPS (Node.js, Redis, NGINX, SSL)
+* 🧪 Testes funcionais
+
+---
+
+### ☁️ Fase 4: SaaS & Escale
+
+**Objetivo:** Tornar-se um SaaS escalável.
+
+**Tarefas:**
+
+* 👥 Multiusuário (multi-tenancy opcional)
+* ✨ Recursos avançados (agendamento, automações)
+* 💳 Integração com pagamentos
+* ⚖️ Escalabilidade (load balancer, workers)
+* 📡 Monitoramento e alertas
+
+---
+
+### 🌱 Fase 5: Sustentar
+
+**Objetivo:** Manter a estabilidade e evoluir com o tempo.
+
+**Tarefas contínuas:**
+
+* 🩺 Monitoramento
+* 🐛 Correção de bugs
+* 🔄 Atualização de dependências
+* 💡 Novas funcionalidades
+* ⚡ Otimizações
