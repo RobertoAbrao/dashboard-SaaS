@@ -4,21 +4,21 @@ import io, { Socket } from 'socket.io-client';
 
 export type WhatsAppConnectionStatus =
   | 'offline'
-  | 'connecting_socket' // Conectando ao servidor Socket.IO
-  | 'socket_connected'  // Socket.IO conectado, aguardando status do WhatsApp
-  | 'initializing'      // Pediu para conectar ao WhatsApp, aguardando QR ou ready
+  | 'connecting_socket'
+  | 'socket_connected'
+  | 'initializing'
   | 'qr_ready'
-  | 'authenticated'     // Autenticado, quase online
+  | 'authenticated'
   | 'online'
   | 'auth_failed'
-  | 'disconnected_whatsapp'; // WhatsApp desconectado por algum motivo (diferente de offline inicial)
+  | 'disconnected_whatsapp';
 
-export interface ActivityLogEntry { // Exportar para uso no Dashboard.tsx
+export interface ActivityLogEntry {
     message: string;
     timestamp: string;
 }
 
-export interface DashboardData { // Exportar para uso no Index.tsx
+export interface DashboardData {
   messagesSent: number;
   connections: number;
   botStatus: WhatsAppConnectionStatus;
@@ -52,7 +52,7 @@ export const useWhatsAppConnection = () => {
   });
   const [isProcessingWhatsAppAction, setIsProcessingWhatsAppAction] = useState(false);
   
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null); // socketRef é definido aqui
 
   const updateState = useCallback((partialState: Partial<Omit<WhatsAppState, 'dashboardData'>> & { dashboardData?: Partial<DashboardData> }) => {
     setWhatsAppState(prevState => {
@@ -60,12 +60,11 @@ export const useWhatsAppConnection = () => {
       return {
         ...prevState,
         ...partialState,
-        // Se o dashboardData for atualizado, use-o, caso contrário, mantenha o antigo, mas atualize botStatus nele se o status principal mudou
         dashboardData: {
           ...prevState.dashboardData,
           ...(partialState.dashboardData || {}),
-          botStatus: newStatus, // Garante que botStatus no dashboardData reflita o status principal
-          connections: newStatus === 'online' ? 1 : 0, // Atualiza conexões baseado no status
+          botStatus: newStatus, 
+          connections: newStatus === 'online' ? 1 : 0,
         },
         lastEventTimestamp: new Date().toISOString(),
       };
@@ -81,7 +80,7 @@ export const useWhatsAppConnection = () => {
       reconnectionDelay: 3000,
       transports: ['websocket', 'polling']
     });
-    socketRef.current = socket;
+    socketRef.current = socket; // Atribuído aqui
 
     socket.on('connect', () => {
       console.log('Socket.IO conectado ao servidor:', socket.id);
@@ -126,7 +125,7 @@ export const useWhatsAppConnection = () => {
       setIsProcessingWhatsAppAction(false);
     });
     
-    socket.on('disconnected', (reason?: string) => { // Evento 'disconnected' do Baileys (estado do WhatsApp)
+    socket.on('disconnected', (reason?: string) => {
         console.log('Evento "disconnected" (do WhatsApp) recebido do servidor Baileys:', reason);
         setIsProcessingWhatsAppAction(false); 
         let newStatus: WhatsAppConnectionStatus = 'disconnected_whatsapp';
@@ -138,27 +137,26 @@ export const useWhatsAppConnection = () => {
         } else if (reason === 'initializing') {
             newStatus = 'initializing';
             newMessage = 'Inicializando conexão com WhatsApp...';
-            updateState({ status: newStatus, qrCode: null, message: newMessage}); // Limpa QR code explicitamente
-            return; // Evita o updateState genérico abaixo
+            updateState({ status: newStatus, qrCode: null, message: newMessage});
+            return;
         } else if (reason === 'offline') { 
             newStatus = 'offline';
             newMessage = 'WhatsApp está offline. Clique para conectar.';
         } else if (reason && (typeof reason === 'string' && (reason.includes('loggedOut') || reason.includes('Usuário deslogado')))) {
-            newStatus = 'auth_failed'; // Ou um novo status 'logged_out'
+            newStatus = 'auth_failed';
             newMessage = `Sessão do WhatsApp deslogada. ${reason}`;
         }
         
         updateState({ status: newStatus, qrCode: newStatus === 'qr_ready' ? whatsAppState.qrCode : null, message: newMessage });
     });
 
-    socket.on('disconnected_whatsapp', (reason?: string) => { // Evento customizado para desconexões inesperadas do WhatsApp
+    socket.on('disconnected_whatsapp', (reason?: string) => {
         console.log('Evento "disconnected_whatsapp" recebido:', reason);
         updateState({ status: 'disconnected_whatsapp', qrCode: null, message: `WhatsApp foi desconectado: ${reason || 'Razão desconhecida'}` });
         setIsProcessingWhatsAppAction(false);
     });
 
-
-    socket.on('connection_error', (errorMessage: string) => { // Erro de conexão do Baileys
+    socket.on('connection_error', (errorMessage: string) => {
         console.error('Erro na conexão com WhatsApp (do servidor):', errorMessage);
         updateState({ status: 'auth_failed', qrCode: null, message: `Erro na conexão WhatsApp: ${errorMessage}` });
         setIsProcessingWhatsAppAction(false);
@@ -167,24 +165,13 @@ export const useWhatsAppConnection = () => {
     socket.on('message_sent_status', (data: { to: string, message: string, status: string, error?: string, info?: string }) => {
       if (data.status === 'success') {
         console.log(`Status envio para ${data.to}: Sucesso - ${data.info}`);
-        // Toast de sucesso é tratado no MessageSender.tsx
       } else {
         console.error(`Status envio para ${data.to}: Falha - ${data.error}`);
-        // Toast de erro é tratado no MessageSender.tsx
       }
     });
 
-    // Novo listener para atualizações do dashboard
     socket.on('dashboard_update', (data: DashboardData) => {
       console.log('Dashboard update recebido:', data);
-      // Atualiza o estado principal e o dashboardData aninhado.
-      // O status principal (online, offline, etc.) deve vir de 'dashboardData.botStatus'
-      // para manter a consistência, ou podemos ter um evento de status separado.
-      // Por simplicidade, vamos deixar o status principal ser atualizado por seus próprios eventos
-      // e apenas atualizar o `dashboardData` aqui.
-      // Se o `botStatus` em `data` for diferente do `whatsAppState.status`, pode causar confusão.
-      // Idealmente, `dashboardData.botStatus` deve sempre refletir `whatsAppState.status`.
-      // A função updateState já cuida disso.
       updateState({ dashboardData: data, status: data.botStatus });
     });
 
@@ -192,7 +179,6 @@ export const useWhatsAppConnection = () => {
         console.error('Erro no dashboard (do servidor):', errorMessage);
         updateState({ message: `Dashboard Error: ${errorMessage}` });
     });
-
 
     return () => {
       if (socketRef.current) {
@@ -214,7 +200,7 @@ export const useWhatsAppConnection = () => {
         socketRef.current = null;
       }
     };
-  }, [updateState, whatsAppState.qrCode]); // Adicionado whatsAppState.qrCode para que o updateState tenha o valor mais recente de qrCode ao limpar
+  }, [updateState, whatsAppState.qrCode]);
 
   const restartConnection = useCallback(() => {
     if (isProcessingWhatsAppAction) {
@@ -226,21 +212,16 @@ export const useWhatsAppConnection = () => {
       setIsProcessingWhatsAppAction(true);
       updateState({ status: 'initializing', qrCode: null, message: 'Iniciando conexão com WhatsApp...' });
       socketRef.current.emit('initialize-connection');
-      // O servidor deve responder com 'qr' ou 'ready' ou 'auth_failed'
-      // e o estado de isProcessingWhatsAppAction será resetado nesses listeners.
-      // Adicionar um timeout para resetar isProcessingWhatsAppAction caso o servidor não responda.
       setTimeout(() => {
-        if(isProcessingWhatsAppAction) { // Checa se ainda está processando (não recebeu resposta)
+        if(isProcessingWhatsAppAction) {
             setIsProcessingWhatsAppAction(false);
-            // Poderia atualizar o status para offline ou um erro de timeout aqui se desejado
-            // updateState({status: 'offline', message: 'Timeout ao tentar (re)conectar.'});
         }
-      }, 20000); // Timeout de 20 segundos
+      }, 20000);
     } else {
       console.error('Socket.IO não conectado. Tentando reconectar o socket...');
       updateState({ status: 'offline', message: 'Servidor de automação desconectado. Tentando reconectar...' });
-      socketRef.current?.connect(); // Tenta reconectar o socket
-      setIsProcessingWhatsAppAction(false); // Reseta pois a ação principal (WhatsApp) não foi enviada
+      socketRef.current?.connect();
+      setIsProcessingWhatsAppAction(false);
     }
   }, [updateState, isProcessingWhatsAppAction]);
 
@@ -252,16 +233,13 @@ export const useWhatsAppConnection = () => {
     if (socketRef.current && socketRef.current.connected) {
       console.log('Solicitando logout do cliente WhatsApp...');
       setIsProcessingWhatsAppAction(true);
-      // O status 'initializing' pode não ser o mais adequado aqui, mas é temporário
       updateState({ status: 'initializing', message: 'Desconectando do WhatsApp...' }); 
       socketRef.current.emit('disconnect-client');
-       // O servidor deve responder com 'disconnected' e o status 'offline'
-       // e o estado de isProcessingWhatsAppAction será resetado no listener de 'disconnected'
       setTimeout(() => {
         if(isProcessingWhatsAppAction) {
             setIsProcessingWhatsAppAction(false);
         }
-      }, 10000); // Timeout de 10 segundos
+      }, 10000);
     } else {
       console.error('Socket.IO não conectado.');
       setIsProcessingWhatsAppAction(false);
@@ -279,10 +257,9 @@ export const useWhatsAppConnection = () => {
                 reject(new Error(response?.error || 'Falha ao enviar mensagem para o servidor.'));
             }
         });
-        // Adiciona um timeout para a resposta do servidor
         setTimeout(() => {
             reject(new Error('Timeout: Servidor não respondeu à solicitação de envio de mensagem.'));
-        }, 10000); // 10 segundos de timeout
+        }, 10000);
       });
     } else {
       const errorMsg = 'Não é possível enviar mensagem: WhatsApp não está online ou servidor desconectado.';
@@ -298,6 +275,7 @@ export const useWhatsAppConnection = () => {
     message: whatsAppState.message,
     dashboardData: whatsAppState.dashboardData,
     lastUpdate: whatsAppState.lastEventTimestamp,
+    socketRef, // <<--- GARANTA QUE ESTÁ SENDO EXPORTADO AQUI
     restartConnection,
     disconnectWhatsAppClient,
     sendMessage,

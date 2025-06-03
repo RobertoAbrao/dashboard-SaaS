@@ -1,0 +1,5 @@
+Pergunta: Qual o horário de funcionamento?
+Resposta: Nosso horário é de Segunda a Sexta, das 9h às 18h.
+
+Pergunta: Vocês entregam?
+Resposta: Sim, fazemos entregas em toda a cidade. A taxa é de R$10.
