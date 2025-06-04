@@ -3,12 +3,12 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2 } from 'lucide-react'; // Adicionado Loader2 aqui
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2 } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
 import Dashboard from '@/components/Dashboard';
-import { useWhatsAppConnection, DashboardData } from '@/hooks/useWhatsAppConnection';
+import { useWhatsAppConnection, DashboardData, WhatsAppConnectionStatus } from '@/hooks/useWhatsAppConnection'; // Importado WhatsAppConnectionStatus
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/components/ui/use-toast";
@@ -88,9 +88,10 @@ const Index = () => {
     if (faqFile) {
       try {
         faqTextContent = await faqFile.text();
-      } catch (error) {
+      } catch (error: unknown) { // Modificado para unknown
         console.error("Erro ao ler arquivo FAQ:", error);
-        toast({ title: "Erro ao Ler FAQ", description: `Não foi possível ler o arquivo: ${(error as Error).message}`, variant: "destructive" });
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        toast({ title: "Erro ao Ler FAQ", description: `Não foi possível ler o arquivo: ${errorMessage}`, variant: "destructive" });
         setIsSavingConfig(false);
         return;
       }
@@ -114,10 +115,10 @@ const Index = () => {
     });
   };
 
-
-  const botDisplayStatus = dashboardData.botStatus || currentStatus;
+  // Usa o status do hook diretamente, que já considera o status do bot no dashboardData
+  const botDisplayStatus: WhatsAppConnectionStatus = dashboardData.botStatus || currentStatus;
   
-  const getStatusValue = (statusValue: typeof botDisplayStatus) => {
+  const getStatusValue = (statusValue: WhatsAppConnectionStatus) => { // Tipado o parâmetro
     switch (statusValue) {
       case 'online': return 'Online';
       case 'qr_ready': return 'Aguardando QR';
@@ -131,7 +132,7 @@ const Index = () => {
     }
   };
 
-  const getStatusColors = (statusValue: typeof botDisplayStatus) => {
+  const getStatusColors = (statusValue: WhatsAppConnectionStatus) => { // Tipado o parâmetro
     switch (statusValue) {
       case 'online': return { color: 'text-green-600', bgColor: 'bg-green-50' };
       case 'qr_ready': return { color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
@@ -240,15 +241,19 @@ const Index = () => {
             <Dashboard 
               messagesSent={dashboardData.messagesSent}
               connections={dashboardData.connections}
-              botStatus={dashboardData.botStatus}
+              botStatus={dashboardData.botStatus} // botStatus é do tipo WhatsAppConnectionStatus
               recentActivityData={dashboardData.recentActivity}
             />
           </TabsContent>
           <TabsContent value="qrcode"> <QRCodeSection /> </TabsContent>
           <TabsContent value="messages">
+            {/* A prop botStatus foi removida daqui pois o componente MessageSender a obtém do hook */}
             <MessageSender 
-              onMessageSent={() => {}}
-              botStatus={botDisplayStatus as 'online' | 'offline'}
+              onMessageSent={() => {
+                // Você pode querer atualizar algum estado aqui se necessário, 
+                // ou deixar o feedback por conta dos toasts no MessageSender
+                console.log("onMessageSent callback no Index.tsx");
+              }}
             />
           </TabsContent>
 
@@ -322,7 +327,7 @@ const Index = () => {
                   >
                     {isSavingConfig ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {/* Linha 283 aproximada */}
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Salvando...
                       </>
                     ) : (

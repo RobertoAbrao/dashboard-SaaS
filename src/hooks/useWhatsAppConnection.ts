@@ -25,6 +25,14 @@ export interface DashboardData {
   recentActivity: ActivityLogEntry[];
 }
 
+// Nova interface para informações de mídia
+export interface MediaInfo {
+  serverFilePath: string; // Caminho do arquivo no servidor, retornado pelo endpoint de upload
+  originalName: string;   // Nome original do arquivo
+  mimetype: string;       // Mimetype do arquivo
+  caption?: string;        // Legenda para a mídia
+}
+
 interface WhatsAppState {
   status: WhatsAppConnectionStatus;
   qrCode: string | null;
@@ -52,7 +60,7 @@ export const useWhatsAppConnection = () => {
   });
   const [isProcessingWhatsAppAction, setIsProcessingWhatsAppAction] = useState(false);
   
-  const socketRef = useRef<Socket | null>(null); // socketRef é definido aqui
+  const socketRef = useRef<Socket | null>(null);
 
   const updateState = useCallback((partialState: Partial<Omit<WhatsAppState, 'dashboardData'>> & { dashboardData?: Partial<DashboardData> }) => {
     setWhatsAppState(prevState => {
@@ -80,7 +88,7 @@ export const useWhatsAppConnection = () => {
       reconnectionDelay: 3000,
       transports: ['websocket', 'polling']
     });
-    socketRef.current = socket; // Atribuído aqui
+    socketRef.current = socket;
 
     socket.on('connect', () => {
       console.log('Socket.IO conectado ao servidor:', socket.id);
@@ -246,20 +254,28 @@ export const useWhatsAppConnection = () => {
     }
   }, [updateState, isProcessingWhatsAppAction]);
 
-  const sendMessage = useCallback(async (number: string, messageText: string) => {
+  // MODIFICADO: sendMessage agora aceita mediaInfo opcional
+  const sendMessage = useCallback(async (number: string, messageText: string, mediaInfo?: MediaInfo) => {
     if (socketRef.current && socketRef.current.connected && whatsAppState.status === 'online') {
-      console.log(`Enviando mensagem para ${number} via Socket.IO...`);
+      const payload = {
+        to: number,
+        message: messageText, // Esta será a legenda se mediaInfo for fornecido, ou a mensagem principal
+        mediaInfo: mediaInfo // Contém serverFilePath, originalName, mimetype, caption (caption aqui pode ser redundante se messageText for usado como legenda)
+      };
+      console.log(`Enviando mensagem para ${number} via Socket.IO com payload:`, payload);
+      
       return new Promise((resolve, reject) => {
-        socketRef.current.emit('send-message', { to: number, message: messageText }, (response: { status: string; error?: string; info?: string}) => {
+        socketRef.current.emit('send-message', payload, (response: { status: string; error?: string; info?: string}) => {
             if (response && response.status === 'success') {
                 resolve(response.info || 'Mensagem enviada para a fila do servidor.');
             } else {
                 reject(new Error(response?.error || 'Falha ao enviar mensagem para o servidor.'));
             }
         });
+        // Timeout para a resposta do servidor
         setTimeout(() => {
             reject(new Error('Timeout: Servidor não respondeu à solicitação de envio de mensagem.'));
-        }, 10000);
+        }, 15000); // Aumentado o timeout para acomodar possível processamento de mídia
       });
     } else {
       const errorMsg = 'Não é possível enviar mensagem: WhatsApp não está online ou servidor desconectado.';
@@ -275,9 +291,9 @@ export const useWhatsAppConnection = () => {
     message: whatsAppState.message,
     dashboardData: whatsAppState.dashboardData,
     lastUpdate: whatsAppState.lastEventTimestamp,
-    socketRef, // <<--- GARANTA QUE ESTÁ SENDO EXPORTADO AQUI
+    socketRef,
     restartConnection,
     disconnectWhatsAppClient,
-    sendMessage,
+    sendMessage, // sendMessage agora está atualizado
   };
 };
