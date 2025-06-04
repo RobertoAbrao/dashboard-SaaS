@@ -14,13 +14,13 @@ const qrcodeTerminal = require('qrcode-terminal');
 const pino = require('pino');
 const Redis = require('ioredis');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const multer = require('multer'); // Adicionado para upload de arquivos
+const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:3001", // Ajuste se necessário
+        origin: "http://localhost:3001", 
         methods: ["GET", "POST"]
     }
 });
@@ -32,7 +32,6 @@ const AUTH_FOLDER_PATH = path.join(__dirname, 'baileys_auth_info');
 const frontendBuildPath = path.join(__dirname, '..', 'dist');
 app.use(express.static(frontendBuildPath));
 
-// --- Configuração do Multer para upload de arquivos ---
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -51,18 +50,16 @@ const storage = multer.diskStorage({
 
 const upload = multer({
     storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 }, // Limite de 10MB
+    limits: { fileSize: 10 * 1024 * 1024 }, 
     fileFilter: function (req, file, cb) {
-        if (file.mimetype.startsWith('image/')) { // Permitir apenas imagens por enquanto
+        if (file.mimetype.startsWith('image/')) { 
             cb(null, true);
         } else {
             cb(new Error('Apenas arquivos de imagem são permitidos!'), false);
         }
     }
 });
-// --- Fim da Configuração do Multer ---
 
-// --- Lógica do Redis ---
 const redisClient = new Redis({
     host: 'localhost',
     port: 6379,
@@ -166,9 +163,7 @@ async function initializeRedisData() {
         }
     } catch (error) { console.error("Erro ao inicializar dados no Redis:", error); }
 }
-// --- Fim da Lógica do Redis ---
 
-// --- Lógica da API Gemini ---
 let genAI;
 let geminiModel;
 
@@ -192,9 +187,7 @@ async function initializeGemini(apiKey) {
         genAI = null; geminiModel = null; return false;
     }
 }
-// --- FIM: Lógica da API Gemini ---
 
-// --- Endpoint para Upload de Mídia ---
 app.post('/api/whatsapp/upload-media', upload.single('mediaFile'), (req, res, next) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'Nenhum arquivo enviado ou tipo de arquivo inválido.' });
@@ -204,26 +197,22 @@ app.post('/api/whatsapp/upload-media', upload.single('mediaFile'), (req, res, ne
     addActivityLog(`Arquivo de mídia ${req.file.originalname} (${req.file.mimetype}) recebido para upload.`);
     res.json({
         success: true,
-        filePath: relativeFilePath, // Caminho relativo à pasta 'server'
-        originalName: req.file.originalname, // Nome original do arquivo
+        filePath: relativeFilePath,
+        originalName: req.file.originalname,
         mimetype: req.file.mimetype,
-        serverFileName: req.file.filename // Nome do arquivo no servidor (com timestamp)
+        serverFileName: req.file.filename
     });
-}, (error, req, res, next) => { // Error handler específico para multer e outros erros de upload
+}, (error, req, res, next) => { 
     if (error instanceof multer.MulterError) {
         console.error("Erro do Multer:", error);
         return res.status(400).json({ success: false, message: `Erro no upload: ${error.message}` });
-    } else if (error) { // Outros erros (ex: filtro de arquivo)
+    } else if (error) { 
         console.error("Erro no upload (fileFilter ou outro):", error.message);
         return res.status(400).json({ success: false, message: error.message || 'Erro desconhecido no upload.' });
     }
-    // Se não for um erro de upload, passa para o próximo error handler do Express (se houver)
     next(error); 
 });
-// --- Fim do Endpoint de Upload ---
 
-
-// Lógica de conexão Baileys
 async function connectToWhatsApp() {
     if (isConnecting) {
         console.log("Conexão WhatsApp já está em andamento. Ignorando.");
@@ -241,7 +230,7 @@ async function connectToWhatsApp() {
         sock = makeWASocket({
             printQRInTerminal: false,
             auth: state,
-            logger: pino({ level: 'info' }),
+            logger: pino({ level: 'debug' }),
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -316,15 +305,16 @@ async function connectToWhatsApp() {
                     const systemPrompt = await redisClient.get('bot_config:system_prompt') || 'Você é um assistente prestativo.';
                     const faqText = await redisClient.get('bot_config:faq_text') || '';
                     const fullPrompt = `${systemPrompt}\n\n---Contexto do FAQ---\n${faqText}\n\n---Fim do Contexto do FAQ---\n\nAgora, responda à seguinte mensagem do cliente:\nCliente: "${messageContent}"\nAssistente:`;
-                    console.log(`[Gemini Prompt] Enviando para API (primeiros 200 chars): ${fullPrompt.substring(0, 200)}...`);
-                    
+                                        
                     const result = await geminiModel.generateContent(fullPrompt);
                     const response = await result.response;
                     const geminiReply = response.text();
 
                     if (geminiReply) {
-                        console.log(`[Gemini Resposta] Para ${remoteJid}: "${geminiReply}"`);
-                        await sock.sendMessage(remoteJid, { text: geminiReply });
+                        console.log(`[GEMINI REPLY SENDING...] Para ${remoteJid} (Resposta Automática): "${geminiReply}"`);
+                        const replySentResponse = await sock.sendMessage(remoteJid, { text: geminiReply });
+                        console.log(`[GEMINI REPLY SENT OK] Resposta de sock.sendMessage (Resposta Automática) para ${remoteJid}:`, JSON.stringify(replySentResponse, null, 2));
+                        
                         addActivityLog(`Resposta automática (Gemini) enviada para: ${remoteJid}`);
                         if (redisClient.status === 'ready') await redisClient.incr('bot:messages_sent_today');
                     } else {
@@ -436,8 +426,6 @@ io.on('connection', (socket) => {
         try {
             const geminiApiKey = await redisClient.get('bot_config:gemini_api_key') || '';
             const systemPrompt = await redisClient.get('bot_config:system_prompt') || 'Você é um assistente prestativo.';
-            // Para o nome do arquivo FAQ, não temos como saber o nome original do upload anterior,
-            // então vamos apenas indicar se o texto do FAQ existe.
             const faqTextExists = await redisClient.exists('bot_config:faq_text');
             const faqFilename = faqTextExists && (await redisClient.get('bot_config:faq_text') || '').length > 0 ? "faq.txt (carregado)" : "Nenhum arquivo FAQ carregado.";
 
@@ -447,7 +435,7 @@ io.on('connection', (socket) => {
                     data: { 
                         geminiApiKey: geminiApiKey, 
                         systemPrompt: systemPrompt,
-                        faqFilename: faqFilename // Indica se há conteúdo FAQ
+                        faqFilename: faqFilename 
                     } 
                 });
             }
@@ -458,85 +446,100 @@ io.on('connection', (socket) => {
         }
     });
     
-    // MODIFICADO: Handler 'send-message' para incluir 'mediaInfo'
-    socket.on('send-message', async ({ to, message, mediaInfo }) => { 
-        // mediaInfo é esperado como: { serverFilePath, originalName, mimetype, caption }
+    socket.on('send-message', async ({ to, message, mediaInfo }, callback) => { 
         if (!sock || !sock.authState?.creds?.me) {
-            console.warn(`Tentativa de envio de mensagem por ${clientId} enquanto desconectado.`);
-            return socket.emit('message_sent_status', {
+            console.warn(`[MSG SEND FAIL] Tentativa de envio por ${clientId} enquanto desconectado.`);
+            if (typeof callback === 'function') {
+                callback({
+                    status: 'error',
+                    error: 'WhatsApp não conectado. Não é possível enviar a mensagem.'
+                });
+            }
+            return socket.emit('message_sent_status', { 
                 to,
-                message, // Ou mediaInfo.caption
+                message: mediaInfo?.caption || message,
                 status: 'error',
                 error: 'WhatsApp não conectado. Não é possível enviar a mensagem.'
             });
         }
 
         const messageDescriptionForLog = mediaInfo ? `mídia ${mediaInfo.originalName || 'sem nome'}` : `texto "${message ? message.substring(0,30) + '...' : ''}"`;
-        console.log(`[Socket Event] Recebido 'send-message' de ${clientId} para ${to}. Conteúdo: ${messageDescriptionForLog}`);
+        console.log(`[MSG SEND START] Evento 'send-message' de ${clientId} para ${to}. Conteúdo: ${messageDescriptionForLog}`);
 
         try {
-            const jid = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+            let jid;
+            let cleanNumber = to.replace(/\D/g, ''); 
+            
+            if (cleanNumber.startsWith('55') && cleanNumber.length >= 12) { 
+                jid = `${cleanNumber}@s.whatsapp.net`;
+            } 
+            else if ((cleanNumber.length === 10 || cleanNumber.length === 11) && !cleanNumber.startsWith('55')) {
+                jid = `55${cleanNumber}@s.whatsapp.net`;
+            }
+            else if (to.includes('@')) { 
+                 jid = to;
+            }
+            else { 
+                 jid = `${cleanNumber}@s.whatsapp.net`; 
+            }
+            console.log(`[JID PREP] Número original: "${to}", JID formatado: "${jid}"`);
+            
             let messagePayload = {};
             let sentMessageDescription = `Mensagem de texto para ${jid}`;
 
             if (mediaInfo && mediaInfo.serverFilePath && mediaInfo.mimetype?.startsWith('image/')) {
                 const absoluteMediaPath = path.resolve(__dirname, mediaInfo.serverFilePath); 
                 if (!fs.existsSync(absoluteMediaPath)) {
-                    console.error(`Arquivo de imagem não encontrado no servidor: ${absoluteMediaPath}`);
-                    return socket.emit('message_sent_status', {
-                        to,
-                        message: mediaInfo.caption || message,
-                        status: 'error',
-                        error: 'Arquivo de imagem não encontrado no servidor.'
-                    });
+                    console.error(`[MSG SEND FAIL] Arquivo de imagem não encontrado: ${absoluteMediaPath}`);
+                    if (typeof callback === 'function') callback({ status: 'error', error: 'Arquivo de imagem não encontrado no servidor.' });
+                    return socket.emit('message_sent_status', { to, message: mediaInfo.caption || message, status: 'error', error: 'Arquivo de imagem não encontrado no servidor.'});
                 }
-
                 messagePayload = {
-                    image: { url: absoluteMediaPath },
-                    caption: mediaInfo.caption || message || '', // Usa caption de mediaInfo, senão a mensagem principal
+                    image: fs.readFileSync(absoluteMediaPath),
+                    caption: mediaInfo.caption || message || '',
                     mimetype: mediaInfo.mimetype
                 };
                 sentMessageDescription = `Imagem ${mediaInfo.originalName || mediaInfo.serverFileName} para ${jid}`;
-                console.log(`Preparando para enviar imagem para ${jid}:`, { ...messagePayload, image: { url: 'CAMINHO_ABSOLUTO_OCULTADO_DO_LOG' } });
-            
-            } else if (message && message.trim() !== "") { // Apenas texto se não houver mídia válida
+                console.log(`[MSG SEND PREP] Preparando para enviar imagem (buffer) para ${jid} com caption: "${messagePayload.caption}"`);
+            } else if (message && message.trim() !== "") { 
                 messagePayload = { text: message };
-                console.log(`Preparando para enviar texto para ${jid}:`, messagePayload);
+                console.log(`[MSG SEND PREP] Preparando para enviar texto para ${jid}:`, messagePayload);
             
-            } else { // Nem mídia válida, nem texto
-                 console.warn(`Tentativa de envio de mensagem vazia para ${to} sem mídia válida.`);
-                 return socket.emit('message_sent_status', {
-                    to,
-                    message,
-                    status: 'error',
-                    error: 'A mensagem deve conter texto ou uma imagem válida.'
-                });
+            } else { 
+                 console.warn(`[MSG SEND FAIL] Tentativa de envio de mensagem vazia para ${to} sem mídia válida.`);
+                 if (typeof callback === 'function') callback({ status: 'error', error: 'A mensagem deve conter texto ou uma imagem válida.' });
+                 return socket.emit('message_sent_status', { to, message, status: 'error', error: 'A mensagem deve conter texto ou uma imagem válida.' });
             }
 
-            await sock.sendMessage(jid, messagePayload);
-            console.log(`${sentMessageDescription} enviada com sucesso.`);
+            console.log(`[MSG SENDING...] Enviando para ${jid} com payload:`, messagePayload.text ? {text: messagePayload.text} : {caption: messagePayload.caption, mimetype: messagePayload.mimetype, image_size: messagePayload.image?.length});
+            const sentMsgResponse = await sock.sendMessage(jid, messagePayload);
+            console.log(`[MSG SENT OK] Resposta de sock.sendMessage para ${jid}:`, JSON.stringify(sentMsgResponse, null, 2));
+            
             addActivityLog(`${sentMessageDescription} enviada.`);
             if (redisClient.status === 'ready') await redisClient.incr('bot:messages_sent_today');
             
-            socket.emit('message_sent_status', {
+            const successInfo = `${sentMessageDescription} enviada com sucesso via Baileys. ID da mensagem: ${sentMsgResponse?.key?.id || 'N/A'}`;
+            if (typeof callback === 'function') callback({ status: 'success', info: successInfo, messageId: sentMsgResponse?.key?.id });
+            socket.emit('message_sent_status', { 
                 to,
-                message: sentMessageDescription,
+                message: successInfo,
                 status: 'success',
-                info: `${sentMessageDescription} enviada com sucesso.`
+                info: successInfo
             });
 
             if (mediaInfo && mediaInfo.serverFilePath) {
                 const absoluteMediaPath = path.resolve(__dirname, mediaInfo.serverFilePath);
                 fs.unlink(absoluteMediaPath, (err) => {
-                    if (err) console.error('Erro ao deletar arquivo temporário de mídia:', err);
-                    else console.log('Arquivo temporário de mídia deletado:', mediaInfo.serverFilePath);
+                    if (err) console.error('[FILE CLEANUP ERR] Erro ao deletar arquivo temporário de mídia:', err);
+                    else console.log('[FILE CLEANUP OK] Arquivo temporário de mídia deletado:', mediaInfo.serverFilePath);
                 });
             }
 
         } catch (error) {
-            console.error(`Erro ao enviar mensagem para ${to}:`, error);
+            console.error(`[MSG SEND FAIL] Erro ao enviar ${messageDescriptionForLog} para ${to}:`, error);
             addActivityLog(`Erro ao enviar ${messageDescriptionForLog} para ${to}: ${error.message}`);
-            socket.emit('message_sent_status', {
+            if (typeof callback === 'function') callback({ status: 'error', error: `Falha ao enviar mensagem: ${error.message}` });
+            socket.emit('message_sent_status', { 
                 to,
                 message: mediaInfo ? mediaInfo.caption || message : message,
                 status: 'error',
@@ -567,16 +570,15 @@ process.on('SIGINT', async () => {
     console.log('Encerrando servidor...');
     if (sock) {
         try {
-            await sock.logout("Servidor encerrando"); // Adiciona uma razão para o logout
+            await sock.logout("Servidor encerrando"); 
             console.log('Logout do WhatsApp realizado.');
         } catch (err) {
             console.error('Erro durante o logout do WhatsApp no SIGINT:', err);
         }
-        // sock.end(new Error('Servidor encerrando via SIGINT')); // Alternativa para forçar o fechamento da conexão Baileys
     }
     io.close(() => {
         console.log('Socket.IO fechado.');
-        redisClient.quit(() => { // Garante que o cliente Redis feche corretamente
+        redisClient.quit(() => { 
             console.log('Conexão Redis fechada.');
             server.close(() => {
                 console.log('Servidor HTTP fechado.');
