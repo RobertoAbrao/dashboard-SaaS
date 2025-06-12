@@ -20,7 +20,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:3001", 
+        origin: "http://localhost:3001",
         methods: ["GET", "POST"]
     }
 });
@@ -50,9 +50,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({
     storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 }, 
+    limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: function (req, file, cb) {
-        if (file.mimetype.startsWith('image/')) { 
+        if (file.mimetype.startsWith('image/')) {
             cb(null, true);
         } else {
             cb(new Error('Apenas arquivos de imagem são permitidos!'), false);
@@ -106,9 +106,7 @@ async function addActivityLog(activityMessage) {
         await redisClient.ltrim('bot:activity_log', 0, MAX_ACTIVITY_LOGS - 1);
         console.log(`Log Redis Adicionado: "${activityMessage}"`);
         emitDashboardData();
-    } catch (error) {
-        console.error('Erro ao adicionar log de atividade no Redis:', error);
-    }
+    } catch (error) { console.error('Erro ao adicionar log de atividade no Redis:', error); }
 }
 
 async function emitDashboardData() {
@@ -135,13 +133,63 @@ async function emitDashboardData() {
     io.emit('dashboard_update', dashboardPayload);
 }
 
+let useGeminiAI = true;
+let useCustomResponses = false;
+
+const CUSTOM_RESPONSES_FILE_PATH = path.join(__dirname, 'custom_responses.json');
+let customResponses = {};
+
+async function loadCustomResponses() {
+    try {
+        if (fs.existsSync(CUSTOM_RESPONSES_FILE_PATH)) {
+            const data = fs.readFileSync(CUSTOM_RESPONSES_FILE_PATH, 'utf8');
+            customResponses = JSON.parse(data);
+            console.log('✅ Respostas personalizadas carregadas com sucesso.');
+            addActivityLog('Respostas personalizadas carregadas.');
+        } else {
+            customResponses = {};
+            fs.writeFileSync(CUSTOM_RESPONSES_FILE_PATH, JSON.stringify({}, null, 2), 'utf8');
+            console.log('Arquivo custom_responses.json não encontrado. Criado um novo.');
+            addActivityLog('Arquivo custom_responses.json criado.');
+        }
+    } catch (error) {
+        console.error('❌ Erro ao carregar respostas personalizadas:', error);
+        addActivityLog(`Erro ao carregar respostas personalizadas: ${error.message}`);
+        customResponses = {};
+    }
+}
+
+async function saveCustomResponses(responses) {
+    try {
+        // Ordena as chaves alfabeticamente para garantir uma ordem consistente no arquivo
+        // e no carregamento subsequente. Isso afeta o fallback se 'menu' não for explícito.
+        const sortedKeys = Object.keys(responses).sort((a,b) => a.localeCompare(b));
+        const sortedResponses = {};
+        for (const key of sortedKeys) {
+            sortedResponses[key] = responses[key];
+        }
+
+        fs.writeFileSync(CUSTOM_RESPONSES_FILE_PATH, JSON.stringify(sortedResponses, null, 2), 'utf8');
+        customResponses = sortedResponses; // Atualiza o objeto em memória com a ordem correta
+        console.log('✅ Respostas personalizadas salvas com sucesso.');
+        addActivityLog('Respostas personalizadas salvas.');
+        return true;
+    } catch (error) {
+        console.error('❌ Erro ao salvar respostas personalizadas:', error);
+        addActivityLog(`Erro ao salvar respostas personalizadas: ${error.message}`);
+        return false;
+    }
+}
+
 async function initializeRedisData() {
     try {
         const defaultKeys = {
             'bot:messages_sent_today': '0',
             'bot_config:gemini_api_key': '',
             'bot_config:system_prompt': 'Você é um assistente prestativo.',
-            'bot_config:faq_text': 'Nenhum FAQ carregado ainda.'
+            'bot_config:faq_text': 'Nenhum FAQ carregado ainda.',
+            'bot_config:use_gemini_ai': 'true',
+            'bot_config:use_custom_responses': 'false'
         };
         for (const key in defaultKeys) {
             const exists = await redisClient.exists(key);
@@ -154,13 +202,20 @@ async function initializeRedisData() {
             }
         }
         addActivityLog('Configurações e contadores do bot verificados/inicializados no Redis.');
+
+        useGeminiAI = (await redisClient.get('bot_config:use_gemini_ai')) === 'true';
+        useCustomResponses = (await redisClient.get('bot_config:use_custom_responses')) === 'true';
+        console.log(`[Redis Init] useGeminiAI: ${useGeminiAI}, useCustomResponses: ${useCustomResponses}`);
+
+        await loadCustomResponses(); // Sempre carrega as respostas customizadas ao iniciar
+
         const apiKeyFromRedis = await redisClient.get('bot_config:gemini_api_key');
-        if (apiKeyFromRedis && apiKeyFromRedis.trim() !== "") {
-            console.log("[Redis Init] API Key do Gemini encontrada no Redis, tentando inicializar Gemini...");
+        if (useGeminiAI && apiKeyFromRedis && apiKeyFromRedis.trim() !== "") {
+            console.log("[Redis Init] API Key do Gemini encontrada no Redis e IA ativada, tentando inicializar Gemini...");
             await initializeGemini(apiKeyFromRedis);
         } else {
-            console.log("[Redis Init] Nenhuma API Key do Gemini válida encontrada no Redis para inicialização automática.");
-            addActivityLog("API Key do Gemini ainda não configurada ou vazia.");
+            console.log("[Redis Init] Gemini AI desativado ou API Key não válida/presente.");
+            addActivityLog("Gemini AI desativado ou API Key não configurada/vazia.");
         }
     } catch (error) { console.error("Erro ao inicializar dados no Redis:", error); }
 }
@@ -203,15 +258,15 @@ app.post('/api/whatsapp/upload-media', upload.single('mediaFile'), (req, res, ne
         mimetype: req.file.mimetype,
         serverFileName: req.file.filename
     });
-}, (error, req, res, next) => { 
+}, (error, req, res, next) => {
     if (error instanceof multer.MulterError) {
         console.error("Erro do Multer:", error);
         return res.status(400).json({ success: false, message: `Erro no upload: ${error.message}` });
-    } else if (error) { 
+    } else if (error) {
         console.error("Erro no upload (fileFilter ou outro):", error.message);
         return res.status(400).json({ success: false, message: error.message || 'Erro desconhecido no upload.' });
     }
-    next(error); 
+    next(error);
 });
 
 async function connectToWhatsApp() {
@@ -253,7 +308,7 @@ async function connectToWhatsApp() {
                 currentQr = null;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const reason = DisconnectReason[statusCode] || lastDisconnect?.error?.message || 'Desconhecido';
-                
+
                 console.error(`Conexão WhatsApp fechada. Razão: ${reason} (código ${statusCode})`);
                 addActivityLog(`Conexão WhatsApp fechada. Razão: ${reason}`);
                 io.emit('disconnected', `Conexão fechada: ${reason}`);
@@ -262,10 +317,10 @@ async function connectToWhatsApp() {
                     setTimeout(() => {
                         if (statusCode === DisconnectReason.restartRequired) {
                             console.log('Erro 515 (restartRequired) detectado. Preparando reconexão...');
-                            sock = null; 
+                            sock = null;
                         }
                         console.log(`Tentando reconectar automaticamente em 15s devido a: ${reason}`);
-                        connectToWhatsApp().catch(err => { 
+                        connectToWhatsApp().catch(err => {
                             console.error("Erro na tentativa de reconexão automática:", err);
                             io.emit('auth_failed', `Falha na reconexão automática: ${err.message}`);
                             addActivityLog(`Falha na reconexão automática: ${err.message}`);
@@ -310,7 +365,7 @@ async function connectToWhatsApp() {
                 addActivityLog(`Mensagem recebida de: ${remoteJid}`);
 
                 // Obter nome do contato (se disponível)
-                let contactName = remoteJid; // Fallback para o JID
+                let contactName = remoteJid;
                 if (sock && sock.contacts) {
                     const contact = sock.contacts[remoteJid];
                     if (contact && contact.notify) {
@@ -319,7 +374,7 @@ async function connectToWhatsApp() {
                         contactName = contact.verifiedName;
                     }
                 }
-                
+
                 // Extrair o número de telefone limpo
                 const phoneNumber = remoteJid.split('@')[0];
 
@@ -332,62 +387,112 @@ async function connectToWhatsApp() {
 
                 const receivedMessage = {
                     id: msg.key.id,
-                    from: phoneNumber, // O número do remetente
-                    to: sock.user.id.split(':')[0], // O número do bot
+                    from: phoneNumber,
+                    to: sock.user.id.split(':')[0],
                     content: messageContent,
                     timestamp: new Date().toISOString(),
                     type: messageType,
-                    fromMe: false // Mensagem recebida do cliente
+                    fromMe: false
                 };
 
-                // Salvar a mensagem no histórico do contato
                 await saveMessageToHistory(phoneNumber, receivedMessage);
-
-                // Emite para o frontend para atualização em tempo real do modal
                 io.emit('new_message_for_kanban_ticket', receivedMessage);
-
-                // Criar ou atualizar ticket Kanban
                 await createOrUpdateKanbanTicket(phoneNumber, contactName, messageContent);
 
+                // Lógica de Resposta do Bot
+                if (useCustomResponses) {
+                    console.log("[Bot Response] Usando Respostas Personalizadas.");
+                    const normalizedMessageContent = messageContent.trim().toLowerCase();
 
-                if (!geminiModel || !genAI) {
-                    console.log("[Gemini Check] Gemini não inicializado. Resposta automática desativada.");
-                    continue;
-                }
-                try {
-                    const systemPrompt = await redisClient.get('bot_config:system_prompt') || 'Você é um assistente prestativo.';
-                    const faqText = await redisClient.get('bot_config:faq_text') || '';
-                    const fullPrompt = `${systemPrompt}\n\n---Contexto do FAQ---\n${faqText}\n\n---Fim do Contexto do FAQ---\n\nAgora, responda à seguinte mensagem do cliente:\nCliente: "${messageContent}"\nAssistente:`;
-                                        
-                    const result = await geminiModel.generateContent(fullPrompt);
-                    const response = await result.response;
-                    const geminiReply = response.text();
+                    let matchedOptionKey = Object.keys(customResponses).find(key => key.toLowerCase() === normalizedMessageContent);
 
-                    if (geminiReply) {
-                        console.log(`[GEMINI REPLY SENDING...] Para ${remoteJid} (Resposta Automática): "${geminiReply}"`);
-                        const replySentResponse = await sock.sendMessage(remoteJid, { text: geminiReply });
-                        console.log(`[GEMINI REPLY SENT OK] Resposta de sock.sendMessage (Resposta Automática) para ${remoteJid}:`, JSON.stringify(replySentResponse, null, 2));
-                        
-                        addActivityLog(`Resposta automática (Gemini) enviada para: ${remoteJid}`);
-                        if (redisClient.status === 'ready') await redisClient.incr('bot:messages_sent_today');
-
-                        // Salvar a resposta do bot no histórico também
-                        await saveMessageToHistory(phoneNumber, {
-                            id: replySentResponse.key.id,
-                            from: sock.user.id.split(':')[0], // O número do bot
-                            to: phoneNumber,
-                            content: geminiReply,
-                            timestamp: new Date().toISOString(),
-                            type: 'text',
-                            fromMe: true // Mensagem enviada pelo bot
-                        });
-                    } else {
-                        console.warn(`[Gemini Resposta] Resposta vazia da API para ${remoteJid}.`);
-                        addActivityLog(`Resposta vazia da API Gemini para ${remoteJid}.`);
+                    // Novo Fallback: Prioriza "menu" se existir, caso contrário, não responde
+                    if (!matchedOptionKey && Object.keys(customResponses).length > 0) {
+                        if (customResponses['menu']) { // Verifica se a chave 'menu' existe (já normalizada para minúsculas)
+                            matchedOptionKey = 'menu';
+                            console.log(`[Bot Response] Nenhuma correspondência exata. Usando a opção "menu" como fallback.`);
+                        } else {
+                            // Se 'menu' não existe como opção, o bot não responde a mensagens não reconhecidas
+                            console.log("[Bot Response] Nenhuma correspondência exata e a opção 'menu' não está configurada para fallback. Nenhuma resposta enviada.");
+                            addActivityLog("Nenhuma resposta personalizada correspondente e 'menu' não configurado para fallback.");
+                            continue; // Pula para a próxima mensagem se não houver fallback
+                        }
                     }
-                } catch (error) {
-                    console.error(`[Gemini Erro] Falha ao gerar resposta para ${remoteJid}:`, error.message);
-                    addActivityLog(`Erro ao gerar resposta Gemini para ${remoteJid}: ${error.message}`);
+
+                    if (matchedOptionKey) {
+                        const responseMessages = customResponses[matchedOptionKey];
+                        for (const responseMsg of responseMessages) {
+                            await new Promise(resolve => setTimeout(resolve, responseMsg.delay || 1000));
+                            let payload = { text: responseMsg.text };
+                            if (responseMsg.link) {
+                                payload = { text: `${responseMsg.text}\n${responseMsg.link}` };
+                            }
+                            if (responseMsg.image) {
+                                payload = { text: `${responseMsg.text}\n${responseMsg.image}` };
+                            }
+                            await sock.sendMessage(remoteJid, payload);
+                            addActivityLog(`Resposta personalizada enviada para: ${remoteJid}`);
+                            if (redisClient.status === 'ready') await redisClient.incr('bot:messages_sent_today');
+
+                            await saveMessageToHistory(phoneNumber, {
+                                id: crypto.randomBytes(10).toString('hex'),
+                                from: sock.user.id.split(':')[0],
+                                to: phoneNumber,
+                                content: payload.text,
+                                timestamp: new Date().toISOString(),
+                                type: 'text',
+                                fromMe: true
+                            });
+                        }
+                    } else {
+                        // Esta condição será atingida se não houver correspondência E NENHUMA opção configurada (orderedKeys.length === 0)
+                        console.log("[Bot Response] Nenhuma resposta personalizada configurada. Nenhuma resposta enviada.");
+                        addActivityLog("Nenhuma resposta personalizada configurada.");
+                    }
+                } else if (useGeminiAI) {
+                    console.log("[Bot Response] Usando Bot Inteligente (Gemini).");
+                    if (!geminiModel || !genAI) {
+                        console.log("[Gemini Check] Gemini não inicializado ou desativado. Resposta automática desativada.");
+                        addActivityLog("Gemini AI desativado ou não inicializado. Sem resposta automática.");
+                        continue;
+                    }
+                    try {
+                        const systemPrompt = await redisClient.get('bot_config:system_prompt') || 'Você é um assistente prestativo.';
+                        const faqText = await redisClient.get('bot_config:faq_text') || '';
+                        const fullPrompt = `${systemPrompt}\n\n---Contexto do FAQ---\n${faqText}\n\n---Fim do Contexto do FAQ---\n\nAgora, responda à seguinte mensagem do cliente:\nCliente: "${messageContent}"\nAssistente:`;
+
+                        const result = await geminiModel.generateContent(fullPrompt);
+                        const response = await result.response;
+                        botReply = response.text();
+
+                        if (botReply) {
+                            console.log(`[GEMINI REPLY SENDING...] Para ${remoteJid} (Resposta Automática): "${botReply}"`);
+                            const replySentResponse = await sock.sendMessage(remoteJid, { text: botReply });
+                            console.log(`[GEMINI REPLY SENT OK] Resposta de sock.sendMessage (Resposta Automática) para ${remoteJid}:`, JSON.stringify(replySentResponse, null, 2));
+
+                            addActivityLog(`Resposta automática (Gemini) enviada para: ${remoteJid}`);
+                            if (redisClient.status === 'ready') await redisClient.incr('bot:messages_sent_today');
+
+                            await saveMessageToHistory(phoneNumber, {
+                                id: replySentResponse.key.id,
+                                from: sock.user.id.split(':')[0],
+                                to: phoneNumber,
+                                content: botReply,
+                                timestamp: new Date().toISOString(),
+                                type: 'text',
+                                fromMe: true
+                            });
+                        } else {
+                            console.warn(`[Gemini Resposta] Resposta vazia da API para ${remoteJid}.`);
+                            addActivityLog(`Resposta vazia da API Gemini para ${remoteJid}.`);
+                        }
+                    } catch (error) {
+                        console.error(`[Gemini Erro] Falha ao gerar resposta para ${remoteJid}:`, error.message);
+                        addActivityLog(`Erro ao gerar resposta Gemini para ${remoteJid}: ${error.message}`);
+                    }
+                } else {
+                    console.log("[Bot Response] Nenhum modo de atendimento ativo (IA ou Respostas Personalizadas).");
+                    addActivityLog("Nenhum modo de atendimento ativo para responder.");
                 }
             }
         });
@@ -401,7 +506,7 @@ async function connectToWhatsApp() {
     }
 }
 
-// Funções Kanban
+// Funções Kanban (sem alterações neste momento)
 async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePreview) {
     if (redisClient.status !== 'ready') {
         console.warn('Redis não está pronto para gerenciar tickets Kanban.');
@@ -415,15 +520,13 @@ async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePrevi
 
         if (existingTicket) {
             ticketData = JSON.parse(existingTicket);
-            // Se o ticket já existe e está concluído, move ele para pendente
             if (ticketData.status === 'completed') {
                 console.log(`Ticket para ${phoneNumber} estava 'completed'. Movendo para 'pending' devido a nova mensagem.`);
                 ticketData.status = 'pending';
                 addActivityLog(`Ticket ${phoneNumber} movido de 'completed' para 'pending' por nova mensagem.`);
             }
-            // Atualiza a prévia da mensagem e o timestamp da última mensagem
             ticketData.messagePreview = messagePreview || ticketData.messagePreview;
-            ticketData.lastMessageTimestamp = currentTimestamp; 
+            ticketData.lastMessageTimestamp = currentTimestamp;
             console.log(`Ticket Kanban atualizado para ${phoneNumber}.`);
             addActivityLog(`Ticket Kanban atualizado para ${phoneNumber}.`);
         } else {
@@ -431,16 +534,16 @@ async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePrevi
                 id: phoneNumber,
                 phoneNumber: phoneNumber,
                 contactName: contactName,
-                status: 'pending', // Novo ticket sempre começa como pendente
-                createdAt: currentTimestamp, // Data de criação do ticket
-                lastMessageTimestamp: currentTimestamp, // Timestamp da última mensagem
+                status: 'pending',
+                createdAt: currentTimestamp,
+                lastMessageTimestamp: currentTimestamp,
                 messagePreview: messagePreview,
             };
             console.log(`Novo ticket Kanban criado para ${phoneNumber}.`);
             addActivityLog(`Novo ticket Kanban criado para ${phoneNumber}.`);
         }
         await redisClient.set(ticketKey, JSON.stringify(ticketData));
-        emitKanbanTickets(); // Emite atualização para todos os clientes
+        emitKanbanTickets();
     } catch (error) {
         console.error('Erro ao criar/atualizar ticket Kanban no Redis:', error);
     }
@@ -459,7 +562,7 @@ async function updateKanbanTicketStatus(ticketId, newStatus) {
             ticketData.status = newStatus;
             await redisClient.set(ticketKey, JSON.stringify(ticketData));
             addActivityLog(`Status do ticket ${ticketId} atualizado para: ${newStatus}.`);
-            emitKanbanTickets(); // Emite atualização
+            emitKanbanTickets();
             return true;
         } else {
             console.warn(`Ticket ${ticketId} não encontrado no Redis para atualização de status.`);
@@ -477,10 +580,10 @@ async function removeKanbanTicket(ticketId) {
         return false;
     }
     const ticketKey = `kanban:ticket:${ticketId}`;
-    const historyKey = `kanban:history:${ticketId}`; // Chave do histórico associada
+    const historyKey = `kanban:history:${ticketId}`;
     try {
         const deletedTicketCount = await redisClient.del(ticketKey);
-        const deletedHistoryCount = await redisClient.del(historyKey); // Remove também o histórico
+        const deletedHistoryCount = await redisClient.del(historyKey);
 
         if (deletedTicketCount > 0) {
             addActivityLog(`Ticket Kanban ${ticketId} e seu histórico (${deletedHistoryCount} msgs) removidos.`);
@@ -524,9 +627,8 @@ async function saveMessageToHistory(phoneNumber, message) {
     }
     const historyKey = `kanban:history:${phoneNumber}`;
     try {
-        // Armazena no máximo as últimas 100 mensagens por contato para não sobrecarregar
         await redisClient.rpush(historyKey, JSON.stringify(message));
-        await redisClient.ltrim(historyKey, -100, -1); // Mantém apenas as últimas 100 mensagens
+        await redisClient.ltrim(historyKey, -100, -1);
         console.log(`Mensagem salva no histórico de ${phoneNumber}.`);
     } catch (error) {
         console.error(`Erro ao salvar mensagem no histórico de ${phoneNumber}:`, error);
@@ -570,7 +672,7 @@ io.on('connection', (socket) => {
     else if (currentQr) { socket.emit('qr', currentQr); socket.emit('disconnected', 'qr_ready'); }
     else socket.emit('disconnected', 'offline');
     emitDashboardData();
-    emitKanbanTickets(); // Emite tickets Kanban assim que um novo cliente se conecta
+    emitKanbanTickets();
 
     socket.on('initialize-connection', async () => {
         console.log(`Frontend (${clientId}) solicitou inicialização do WhatsApp.`);
@@ -606,9 +708,13 @@ io.on('connection', (socket) => {
         io.emit('disconnected', 'Sessão encerrada.');
         emitDashboardData();
     });
-    
+
     socket.on('save_bot_config', async (config, callback) => {
-        console.log(`[Socket Event] Recebido 'save_bot_config':`, { ...config, geminiApiKey: config.geminiApiKey ? 'CHAVE_OCULTA' : 'N/A' });
+        console.log(`[Socket Event] Recebido 'save_bot_config':`, {
+            ...config,
+            geminiApiKey: config.geminiApiKey ? 'CHAVE_OCULTA' : 'N/A',
+            customResponses: config.customResponses ? 'RESPOSTAS_OCULTAS' : 'N/A'
+        });
         try {
             if (redisClient.status !== 'ready') {
                 console.warn("[Save Config] Redis não está pronto.");
@@ -616,21 +722,53 @@ io.on('connection', (socket) => {
                 return;
             }
             let geminiReInitialized = false;
+
             if (config.geminiApiKey) {
                 await redisClient.set('bot_config:gemini_api_key', config.geminiApiKey);
                 console.log("[Save Config] API Key do Gemini salva no Redis.");
-                geminiReInitialized = await initializeGemini(config.geminiApiKey); 
+            } else {
+                await redisClient.set('bot_config:gemini_api_key', '');
             }
+
             if (config.systemPrompt) {
                 await redisClient.set('bot_config:system_prompt', config.systemPrompt);
                 console.log("[Save Config] Prompt do sistema salvo no Redis.");
             }
+
             if (typeof config.faqText === 'string') {
                 await redisClient.set('bot_config:faq_text', config.faqText);
                 console.log("[Save Config] Texto do FAQ salvo no Redis.");
             }
-            
-            const successMessage = `Configurações salvas com sucesso! ${config.geminiApiKey ? (geminiReInitialized ? 'API Gemini operacional.' : 'Falha ao inicializar API Gemini com a nova chave.') : 'API Gemini não configurada.'}`;
+
+            useGeminiAI = config.useGeminiAI;
+            useCustomResponses = config.useCustomResponses;
+
+            await redisClient.set('bot_config:use_gemini_ai', String(useGeminiAI));
+            await redisClient.set('bot_config:use_custom_responses', String(useCustomResponses));
+            console.log(`[Save Config] useGeminiAI: ${useGeminiAI}, useCustomResponses: ${useCustomResponses}`);
+
+            if (useGeminiAI && config.geminiApiKey) {
+                geminiReInitialized = await initializeGemini(config.geminiApiKey);
+            } else {
+                genAI = null;
+                geminiModel = null;
+                addActivityLog("Gemini AI desativado ou chave removida.");
+            }
+
+            if (useCustomResponses && config.customResponses) {
+                const normalizedCustomResponses = {};
+                for (const key in config.customResponses) {
+                    normalizedCustomResponses[key.toLowerCase()] = config.customResponses[key];
+                }
+                await saveCustomResponses(normalizedCustomResponses);
+            } else {
+                console.log("Respostas personalizadas desativadas.");
+                await saveCustomResponses({});
+            }
+
+            const successMessage = `Configurações salvas com sucesso! ` +
+                                   `${useGeminiAI ? (geminiReInitialized ? 'API Gemini operacional.' : 'Falha ao inicializar API Gemini com a nova chave.') : 'API Gemini desativada.'} ` +
+                                   `${useCustomResponses ? 'Respostas Personalizadas ativadas.' : 'Respostas Personalizadas desativadas.'}`;
             addActivityLog('Configurações do bot salvas via frontend.');
             if (typeof callback === 'function') callback({ success: true, message: successMessage });
 
@@ -654,14 +792,22 @@ io.on('connection', (socket) => {
             const faqTextExists = await redisClient.exists('bot_config:faq_text');
             const faqFilename = faqTextExists && (await redisClient.get('bot_config:faq_text') || '').length > 0 ? "faq.txt (carregado)" : "Nenhum arquivo FAQ carregado.";
 
+            const currentUseGeminiAI = (await redisClient.get('bot_config:use_gemini_ai')) === 'true';
+            const currentUseCustomResponses = (await redisClient.get('bot_config:use_custom_responses')) === 'true';
+
+            await loadCustomResponses();
+
             if (typeof callback === 'function') {
-                callback({ 
-                    success: true, 
-                    data: { 
-                        geminiApiKey: geminiApiKey, 
+                callback({
+                    success: true,
+                    data: {
+                        geminiApiKey: geminiApiKey,
                         systemPrompt: systemPrompt,
-                        faqFilename: faqFilename 
-                    } 
+                        faqFilename: faqFilename,
+                        useGeminiAI: currentUseGeminiAI,
+                        useCustomResponses: currentUseCustomResponses,
+                        customResponses: customResponses
+                    }
                 });
             }
         } catch (error) {
@@ -670,8 +816,8 @@ io.on('connection', (socket) => {
             if (typeof callback === 'function') callback({ success: false, message: `Erro ao buscar: ${error.message}` });
         }
     });
-    
-    socket.on('send-message', async ({ to, message, mediaInfo }, callback) => { 
+
+    socket.on('send-message', async ({ to, message, mediaInfo }, callback) => {
         if (!sock || !sock.authState?.creds?.me) {
             console.warn(`[MSG SEND FAIL] Tentativa de envio por ${clientId} enquanto desconectado.`);
             if (typeof callback === 'function') {
@@ -680,7 +826,7 @@ io.on('connection', (socket) => {
                     error: 'WhatsApp não conectado. Não é possível enviar a mensagem.'
                 });
             }
-            return socket.emit('message_sent_status', { 
+            return socket.emit('message_sent_status', {
                 to,
                 message: mediaInfo?.caption || message,
                 status: 'error',
@@ -693,28 +839,28 @@ io.on('connection', (socket) => {
 
         try {
             let jid;
-            let cleanNumber = to.replace(/\D/g, ''); 
-            
-            if (cleanNumber.startsWith('55') && cleanNumber.length >= 12) { 
+            let cleanNumber = to.replace(/\D/g, '');
+
+            if (cleanNumber.startsWith('55') && cleanNumber.length >= 12) {
                 jid = `${cleanNumber}@s.whatsapp.net`;
-            } 
+            }
             else if ((cleanNumber.length === 10 || cleanNumber.length === 11) && !cleanNumber.startsWith('55')) {
                 jid = `55${cleanNumber}@s.whatsapp.net`;
             }
-            else if (to.includes('@')) { 
+            else if (to.includes('@')) {
                  jid = to;
             }
-            else { 
-                 jid = `${cleanNumber}@s.whatsapp.net`; 
+            else {
+                 jid = `${cleanNumber}@s.whatsapp.net`;
             }
             console.log(`[JID PREP] Número original: "${to}", JID formatado: "${jid}"`);
-            
+
             let messagePayload = {};
             let sentMessageDescription = `Mensagem de texto para ${jid}`;
-            let messageType = 'text'; // Default to text
+            let messageType = 'text';
 
             if (mediaInfo && mediaInfo.serverFilePath && mediaInfo.mimetype?.startsWith('image/')) {
-                const absoluteMediaPath = path.resolve(__dirname, mediaInfo.serverFilePath); 
+                const absoluteMediaPath = path.resolve(__dirname, mediaInfo.serverFilePath);
                 if (!fs.existsSync(absoluteMediaPath)) {
                     console.error(`[MSG SEND FAIL] Arquivo de imagem não encontrado: ${absoluteMediaPath}`);
                     if (typeof callback === 'function') callback({ status: 'error', error: 'Arquivo de imagem não encontrado no servidor.' });
@@ -728,11 +874,11 @@ io.on('connection', (socket) => {
                 sentMessageDescription = `Imagem ${mediaInfo.originalName || mediaInfo.serverFileName} para ${jid}`;
                 messageType = 'image';
                 console.log(`[MSG SEND PREP] Preparando para enviar imagem (buffer) para ${jid} com caption: "${messagePayload.caption}"`);
-            } else if (message && message.trim() !== "") { 
+            } else if (message && message.trim() !== "") {
                 messagePayload = { text: message };
                 console.log(`[MSG SEND PREP] Preparando para enviar texto para ${jid}:`, messagePayload);
-            
-            } else { 
+
+            } else {
                  console.warn(`[MSG SEND FAIL] Tentativa de envio de mensagem vazia para ${to} sem mídia válida.`);
                  if (typeof callback === 'function') callback({ status: 'error', error: 'A mensagem deve conter texto ou uma imagem válida.' });
                  return socket.emit('message_sent_status', { to, message, status: 'error', error: 'A mensagem deve conter texto ou uma imagem válida.' });
@@ -741,26 +887,23 @@ io.on('connection', (socket) => {
             console.log(`[MSG SENDING...] Enviando para ${jid} com payload:`, messagePayload.text ? {text: messagePayload.text} : {caption: messagePayload.caption, mimetype: messagePayload.mimetype, image_size: messagePayload.image?.length});
             const sentMsgResponse = await sock.sendMessage(jid, messagePayload);
             console.log(`[MSG SENT OK] Resposta de sock.sendMessage (Resposta Automática) para ${jid}:`, JSON.stringify(sentMsgResponse, null, 2));
-            
+
             addActivityLog(`${sentMessageDescription} enviada.`);
             if (redisClient.status === 'ready') await redisClient.incr('bot:messages_sent_today');
 
-            // Salvar a mensagem enviada no histórico do contato
-            // Usar o phoneNumber limpo para a chave do histórico
-            const cleanToNumber = to.replace(/\D/g, ''); 
+            const cleanToNumber = to.replace(/\D/g, '');
             await saveMessageToHistory(cleanToNumber, {
                 id: sentMsgResponse.key.id,
-                from: sock.user.id.split(':')[0], // O número do bot
+                from: sock.user.id.split(':')[0],
                 to: cleanToNumber,
                 content: mediaInfo?.caption || message || '',
                 timestamp: new Date().toISOString(),
                 type: messageType,
-                fromMe: true // Mensagem enviada pelo bot/usuário do dashboard
+                fromMe: true
             });
-            // Emitir a mensagem enviada para o frontend para atualização do modal
             io.emit('new_message_for_kanban_ticket', {
                 id: sentMsgResponse.key.id,
-                from: sock.user.id.split(':')[0], // O número do bot
+                from: sock.user.id.split(':')[0],
                 to: cleanToNumber,
                 content: mediaInfo?.caption || message || '',
                 timestamp: new Date().toISOString(),
@@ -768,14 +911,14 @@ io.on('connection', (socket) => {
                 fromMe: true,
             });
 
-            
+
             const successInfo = `${sentMessageDescription} enviada com sucesso via Baileys. ID da mensagem: ${sentMsgResponse?.key?.id || 'N/A'}`;
             if (typeof callback === 'function') callback({ status: 'success', info: successInfo, messageId: sentMsgResponse?.key?.id });
-            socket.emit('message_sent_status', { 
+            socket.emit('message_sent_status', {
                 to,
-                message: successInfo,
-                status: 'success',
-                info: successInfo
+                message: mediaInfo ? mediaInfo.caption || message : message,
+                status: 'error',
+                error: `Falha ao enviar mensagem: ${error.message}`
             });
 
             if (mediaInfo && mediaInfo.serverFilePath) {
@@ -790,7 +933,7 @@ io.on('connection', (socket) => {
             console.error(`[MSG SEND FAIL] Erro ao enviar ${messageDescriptionForLog} para ${to}:`, error);
             addActivityLog(`Erro ao enviar ${messageDescriptionForLog} para ${to}: ${error.message}`);
             if (typeof callback === 'function') callback({ status: 'error', error: `Falha ao enviar mensagem: ${error.message}` });
-            socket.emit('message_sent_status', { 
+            socket.emit('message_sent_status', {
                 to,
                 message: mediaInfo ? mediaInfo.caption || message : message,
                 status: 'error',
@@ -838,7 +981,7 @@ io.on('connection', (socket) => {
     });
 });
 
-app.get('*', (req, res, next) => { 
+app.get('*', (req, res, next) => {
     if (req.path.startsWith('/socket.io/')) return next();
     const indexPath = path.join(frontendBuildPath, 'index.html');
     if (fs.existsSync(indexPath)) res.sendFile(indexPath);
@@ -854,7 +997,7 @@ process.on('SIGINT', async () => {
     console.log('Encerrando servidor...');
     if (sock) {
         try {
-            await sock.logout("Servidor encerrando"); 
+            await sock.logout("Servidor encerrando");
             console.log('Logout do WhatsApp realizado.');
         } catch (err) {
             console.error('Erro durante o logout do WhatsApp no SIGINT:', err);
@@ -862,7 +1005,7 @@ process.on('SIGINT', async () => {
     }
     io.close(() => {
         console.log('Socket.IO fechado.');
-        redisClient.quit(() => { 
+        redisClient.quit(() => {
             console.log('Conexão Redis fechada.');
             server.close(() => {
                 console.log('Servidor HTTP fechado.');

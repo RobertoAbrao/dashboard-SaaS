@@ -1,0 +1,25 @@
+{
+  "1": [
+    {
+      "text": "Problemas com login - teste",
+      "delay": 1000
+    }
+  ],
+  "2": [
+    {
+      "text": "Gabarito - teste",
+      "delay": 1000,
+      "link": "abraotech.com"
+    },
+    {
+      "text": "aqui vai a prova, seguraaaaaa",
+      "delay": 1000
+    }
+  ],
+  "menu": [
+    {
+      "text": "olá, sou um assinstente:\n\nDigite a opção desejada:\n\n1 - Problemas com login\n2 - Gabarito\n3 - Falar com atendente",
+      "delay": 1000
+    }
+  ]
+}

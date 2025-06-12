@@ -3,23 +3,33 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo } from 'lucide-react';
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
 import Dashboard from '@/components/Dashboard';
-import { useWhatsAppConnection, DashboardData, WhatsAppConnectionStatus } from '@/hooks/useWhatsAppConnection'; // Importado WhatsAppConnectionStatus
+import { useWhatsAppConnection, DashboardData, WhatsAppConnectionStatus } from '@/hooks/useWhatsAppConnection';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/components/ui/use-toast";
-import KanbanBoard from '@/components/KanbanBoard'; // Importar o novo componente KanbanBoard
+import KanbanBoard from '@/components/KanbanBoard';
+import { Switch } from '@/components/ui/switch';
 
 interface BotConfig {
   geminiApiKey: string;
   systemPrompt: string;
   faqText: string;
+  useGeminiAI: boolean;
+  useCustomResponses: boolean;
+  customResponses?: { [key: string]: ResponseMessage[] };
 }
 
+interface ResponseMessage {
+  text: string;
+  delay: number;
+  link?: string;
+  image?: string;
+}
 
 const Index = () => {
   const { status: currentStatus, dashboardData, message: hookMessage, socketRef } = useWhatsAppConnection();
@@ -31,24 +41,45 @@ const Index = () => {
   const [faqFileName, setFaqFileName] = useState<string>('Nenhum arquivo selecionado');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
+  const [useGeminiAI, setUseGeminiAI] = useState(true);
+  const [useCustomResponses, setUseCustomResponses] = useState(false);
+  const [customResponses, setCustomResponses] = useState<{ [key: string]: ResponseMessage[] }>({});
+
   useEffect(() => {
     if (socketRef?.current && socketRef.current.connected) {
-      console.log("Solicitando configurações do bot do servidor...");
-      socketRef.current.emit('get_bot_config', (response: { success: boolean, data?: Partial<BotConfig> & { faqFilename?: string }, message?: string }) => {
-        if (response.success && response.data) {
-          console.log("Configurações recebidas:", response.data);
-          setGeminiApiKey(response.data.geminiApiKey || '');
-          setSystemPrompt(response.data.systemPrompt || 'Você é um assistente prestativo.');
-          if (response.data.faqFilename) {
-            setFaqFileName(response.data.faqFilename);
+      const fetchConfig = () => {
+        console.log("Solicitando configurações do bot do servidor...");
+        socketRef.current.emit('get_bot_config', (response: { success: boolean, data?: Partial<BotConfig> & { faqFilename?: string }, message?: string }) => {
+          if (response.success && response.data) {
+            console.log("Configurações recebidas:", response.data);
+            setGeminiApiKey(response.data.geminiApiKey || '');
+            setSystemPrompt(response.data.systemPrompt || 'Você é um assistente prestativo.');
+            if (response.data.faqFilename) {
+              setFaqFileName(response.data.faqFilename);
+            }
+            setUseGeminiAI(response.data.useGeminiAI ?? true);
+            setUseCustomResponses(response.data.useCustomResponses ?? false);
+            setCustomResponses(response.data.customResponses || {});
+            toast({ title: "Configurações do Bot Carregadas", description: "Suas configurações anteriores foram carregadas." });
+          } else {
+            toast({ title: "Erro ao Carregar Configurações", description: response.message || "Não foi possível buscar as configurações.", variant: "destructive" });
           }
-          toast({ title: "Configurações do Bot Carregadas", description: "Suas configurações anteriores foram carregadas." });
-        } else {
-          toast({ title: "Erro ao Carregar Configurações", description: response.message || "Não foi possível buscar as configurações.", variant: "destructive" });
-        }
-      });
+        });
+      };
+
+      if (currentStatus === 'socket_connected' || currentStatus === 'online') {
+        fetchConfig();
+      } else {
+        const handleReady = () => fetchConfig();
+        socketRef.current.on('ready', handleReady);
+        return () => {
+          if (socketRef.current) {
+            socketRef.current.off('ready', handleReady);
+          }
+        };
+      }
     }
-  }, [socketRef, toast]);
+  }, [socketRef, toast, currentStatus]);
 
 
   const handleFaqFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -75,21 +106,43 @@ const Index = () => {
       toast({ title: "Erro de Conexão", description: "Não foi possível conectar ao servidor para salvar.", variant: "destructive" });
       return;
     }
-    if (!geminiApiKey) {
+    if (!useGeminiAI && !useCustomResponses) {
+        toast({ title: "Modo de Atendimento", description: "Pelo menos um modo de atendimento (IA ou Respostas Personalizadas) deve estar ativo.", variant: "destructive" });
+        return;
+    }
+    if (useGeminiAI && !geminiApiKey) {
       toast({ title: "API Key Faltando", description: "Por favor, insira a API Key do Gemini.", variant: "destructive" });
       return;
     }
-     if (!systemPrompt) {
+     if (useGeminiAI && !systemPrompt) {
       toast({ title: "Prompt do Sistema Faltando", description: "Por favor, defina o prompt de comportamento do bot.", variant: "destructive" });
       return;
     }
+    if (useCustomResponses && Object.keys(customResponses).length === 0) {
+        toast({ title: "Respostas Personalizadas Vazias", description: "Você ativou respostas personalizadas, mas não adicionou nenhuma opção.", variant: "destructive" });
+        return;
+    }
+
+    if (useCustomResponses) {
+      const emptyKeys = Object.keys(customResponses).filter(key => key.trim() === '');
+      if (emptyKeys.length > 0) {
+        toast({ title: "Palavra-chave Vazia", description: "Todas as opções de menu de respostas personalizadas devem ter uma palavra-chave.", variant: "destructive" });
+        return;
+      }
+      const emptyMessages = Object.values(customResponses).some(messages => messages.some(msg => msg.text.trim() === ''));
+      if (emptyMessages) {
+          toast({ title: "Mensagem Vazia", description: "Todas as mensagens em respostas personalizadas devem ter um texto.", variant: "destructive" });
+          return;
+      }
+    }
+
 
     setIsSavingConfig(true);
     let faqTextContent = '';
     if (faqFile) {
       try {
         faqTextContent = await faqFile.text();
-      } catch (error: unknown) { // Modificado para unknown
+      } catch (error: unknown) {
         console.error("Erro ao ler arquivo FAQ:", error);
         const errorMessage = error instanceof Error ? error.message : String(error);
         toast({ title: "Erro ao Ler FAQ", description: `Não foi possível ler o arquivo: ${errorMessage}`, variant: "destructive" });
@@ -101,9 +154,12 @@ const Index = () => {
     const configToSave: Partial<BotConfig> = {
       geminiApiKey,
       systemPrompt,
-      ...(faqFile && { faqText: faqTextContent }),
+      faqText: faqTextContent,
+      useGeminiAI,
+      useCustomResponses,
+      customResponses,
     };
-    
+
     console.log("Enviando para salvar config:", configToSave);
 
     socketRef.current.emit('save_bot_config', configToSave, (response: { success: boolean, message: string }) => {
@@ -116,10 +172,112 @@ const Index = () => {
     });
   };
 
-  // Usa o status do hook diretamente, que já considera o status do bot no dashboardData
+  const handleAddOption = useCallback(() => {
+    setCustomResponses(prev => {
+      const existingKeys = Object.keys(prev);
+      let newKey = `Nova Opção`;
+      let counter = 1;
+
+      // Se não houver opções existentes, a primeira será "Menu"
+      if (existingKeys.length === 0) {
+        newKey = "menu"; // Palavra-chave "menu" em minúsculas
+        // Verifique se já existe "menu" (case-insensitive) antes de atribuir
+        if (existingKeys.some(k => k.toLowerCase() === newKey.toLowerCase())) {
+            newKey = `Nova Opção ${counter++}`; // Fallback para "Nova Opção N"
+        }
+      } else {
+        // Se já existem opções, encontra um nome "Nova Opção N" não usado
+        while (existingKeys.some(k => k.toLowerCase() === newKey.toLowerCase())) {
+            newKey = `Nova Opção ${counter++}`;
+        }
+      }
+
+      // Garante que a nova opção seja adicionada ao final para manter a ordem visual
+      // A persistência no JSON e a lógica de fallback do backend ainda dependerão de ordenar as chaves alfabeticamente ou de uma estrutura de array
+      // Para manter a "ordem" visual e a intenção de "primeira opção criada = menu", a melhor forma é garantir que 'menu' seja a primeira chave alfabeticamente ou forçar a ordem.
+      // Como estamos usando Object.keys().sort() para renderizar, 'menu' (se for a primeira palavra-chave) será a primeira alfabeticamente.
+      const newState = { ...prev, [newKey]: [{ text: '', delay: 1000 }] };
+
+      // Para garantir que "menu" seja a primeira chave no objeto, forçamos a recriação do objeto com "menu" na frente, se for o caso.
+      if (newKey === "menu" && Object.keys(newState).length > 1) {
+          const menuOption = newState["menu"];
+          delete newState["menu"];
+          return { "menu": menuOption, ...newState }; // Coloca "menu" no início
+      }
+
+      return newState;
+    });
+  }, [customResponses]);
+
+
+  const handleRemoveOption = useCallback((keyToRemove: string) => {
+    setCustomResponses(prev => {
+      const newState = { ...prev };
+      delete newState[keyToRemove];
+      return newState;
+    });
+  }, []);
+
+  const handleUpdateOptionKey = useCallback((oldKey: string, newKey: string) => {
+    setCustomResponses(prev => {
+      const trimmedNewKey = newKey.trim();
+      if (oldKey === trimmedNewKey) return prev;
+      if (!trimmedNewKey) {
+        return prev;
+      }
+      // Verifica se a nova chave já existe (case-insensitive)
+      if (Object.keys(prev).some(k => k.toLowerCase() === trimmedNewKey.toLowerCase() && k.toLowerCase() !== oldKey.toLowerCase())) {
+        toast({ title: "Palavra-chave Duplicada", description: `A palavra-chave "${trimmedNewKey}" já existe.`, variant: "destructive" });
+        return prev;
+      }
+
+      const newState: { [key: string]: ResponseMessage[] } = {};
+      const orderedKeys = Object.keys(prev).sort((a,b) => a.localeCompare(b)); // Mantém a ordem alfabética para re-inserção
+
+      orderedKeys.forEach(key => {
+        if (key === oldKey) {
+          newState[trimmedNewKey] = prev[oldKey];
+        } else {
+          newState[key] = prev[key];
+        }
+      });
+      return newState;
+    });
+  }, [toast]);
+
+
+  const handleAddMessageToOption = useCallback((optionKey: string) => {
+    setCustomResponses(prev => ({
+      ...prev,
+      [optionKey]: [...(prev[optionKey] || []), { text: '', delay: 1000 }]
+    }));
+  }, []);
+
+  const handleRemoveMessageFromOption = useCallback((optionKey: string, messageIndex: number) => {
+    setCustomResponses(prev => ({
+      ...prev,
+      [optionKey]: prev[optionKey].filter((_, i) => i !== messageIndex)
+    }));
+  }, []);
+
+  const handleMessageChange = useCallback((
+    optionKey: string,
+    messageIndex: number,
+    field: keyof ResponseMessage,
+    value: string | number
+  ) => {
+    setCustomResponses(prev => ({
+      ...prev,
+      [optionKey]: prev[optionKey].map((msg, i) =>
+        i === messageIndex ? { ...msg, [field]: value } : msg
+      )
+    }));
+  }, []);
+
+
   const botDisplayStatus: WhatsAppConnectionStatus = dashboardData.botStatus || currentStatus;
-  
-  const getStatusValue = (statusValue: WhatsAppConnectionStatus) => { // Tipado o parâmetro
+
+  const getStatusValue = (statusValue: WhatsAppConnectionStatus) => {
     switch (statusValue) {
       case 'online': return 'Online';
       case 'qr_ready': return 'Aguardando QR';
@@ -133,7 +291,7 @@ const Index = () => {
     }
   };
 
-  const getStatusColors = (statusValue: WhatsAppConnectionStatus) => { // Tipado o parâmetro
+  const getStatusColors = (statusValue: WhatsAppConnectionStatus) => {
     switch (statusValue) {
       case 'online': return { color: 'text-green-600', bgColor: 'bg-green-50' };
       case 'qr_ready': return { color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
@@ -146,15 +304,14 @@ const Index = () => {
       default: return { color: 'text-gray-600', bgColor: 'bg-gray-50' };
     }
   };
-  
-  const statusColors = getStatusColors(botDisplayStatus);
+
   const stats = [
     {
       title: "Status do Bot",
       value: getStatusValue(botDisplayStatus),
       icon: Activity,
-      color: statusColors.color,
-      bgColor: statusColors.bgColor,
+      color: getStatusColors(botDisplayStatus).color,
+      bgColor: getStatusColors(botDisplayStatus).bgColor,
     },
     {
       title: "Mensagens Enviadas Hoje",
@@ -172,7 +329,7 @@ const Index = () => {
     },
     {
       title: "Uptime (Placeholder)",
-      value: "99.9%", 
+      value: "99.9%",
       icon: BarChart3,
       color: 'text-indigo-600',
       bgColor: 'bg-indigo-50'
@@ -219,7 +376,7 @@ const Index = () => {
         </div>
 
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-1 md:grid-cols-4 lg:grid-cols-5 bg-white shadow-sm"> {/* Adicionado lg:grid-cols-5 */}
+          <TabsList className="grid w-full grid-cols-1 md:grid-cols-4 lg:grid-cols-5 bg-white shadow-sm">
              <TabsTrigger value="dashboard" className="flex items-center space-x-2">
               <BarChart3 className="h-4 w-4" />
               <span>Dashboard</span>
@@ -232,7 +389,7 @@ const Index = () => {
               <Send className="h-4 w-4" />
               <span>Enviar Mensagens</span>
             </TabsTrigger>
-            <TabsTrigger value="kanban" className="flex items-center space-x-2"> {/* Nova aba Kanban */}
+            <TabsTrigger value="kanban" className="flex items-center space-x-2">
               <ListTodo className="h-4 w-4" />
               <span>Kanban</span>
             </TabsTrigger>
@@ -243,26 +400,23 @@ const Index = () => {
           </TabsList>
 
           <TabsContent value="dashboard">
-            <Dashboard 
+            <Dashboard
               messagesSent={dashboardData.messagesSent}
               connections={dashboardData.connections}
-              botStatus={dashboardData.botStatus} // botStatus é do tipo WhatsAppConnectionStatus
+              botStatus={dashboardData.botStatus}
               recentActivityData={dashboardData.recentActivity}
             />
           </TabsContent>
           <TabsContent value="qrcode"> <QRCodeSection /> </TabsContent>
           <TabsContent value="messages">
-            {/* A prop botStatus foi removida daqui pois o componente MessageSender a obtém do hook */}
-            <MessageSender 
+            <MessageSender
               onMessageSent={() => {
-                // Você pode querer atualizar algum estado aqui se necessário, 
-                // ou deixar o feedback por conta dos toasts no MessageSender
                 console.log("onMessageSent callback no Index.tsx");
               }}
             />
           </TabsContent>
 
-          <TabsContent value="kanban"> {/* Conteúdo da nova aba Kanban */}
+          <TabsContent value="kanban">
             <KanbanBoard />
           </TabsContent>
 
@@ -271,66 +425,202 @@ const Index = () => {
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <Brain className="h-5 w-5 text-purple-600" />
-                  <span>Configurações do Bot Inteligente</span>
+                  <span>Configurações do Bot Inteligente e Respostas</span>
                 </CardTitle>
                 <CardDescription>
-                  Personalize o comportamento e a base de conhecimento do seu assistente IA.
+                  Personalize o comportamento e a base de conhecimento do seu assistente.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <label htmlFor="geminiApiKey" className="flex items-center text-sm font-medium text-gray-700">
-                    <KeyRound className="h-4 w-4 mr-2 text-gray-500" />
-                    API Key do Gemini
-                  </label>
-                  <Input
-                    id="geminiApiKey"
-                    type="password" 
-                    placeholder="Cole sua API Key do Google Gemini aqui"
-                    value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    className="w-full"
-                  />
-                   <p className="text-xs text-gray-500">Sua chave será armazenada de forma segura no servidor.</p>
+                {/* Seção de Ativação/Desativação da IA */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center space-x-3">
+                        <Brain className="h-5 w-5 text-purple-600" />
+                        <div>
+                            <h4 className="font-semibold text-gray-800">Usar Bot Inteligente (Google Gemini)</h4>
+                            <p className="text-sm text-gray-600">Ativa ou desativa a inteligência artificial para responder automaticamente.</p>
+                        </div>
+                    </div>
+                    <Switch
+                        checked={useGeminiAI}
+                        onCheckedChange={(checked) => {
+                            setUseGeminiAI(checked);
+                            if (checked) {
+                                setUseCustomResponses(false);
+                            }
+                        }}
+                        id="toggle-gemini-ai"
+                    />
                 </div>
 
-                <div className="space-y-2">
-                  <label htmlFor="systemPrompt" className="flex items-center text-sm font-medium text-gray-700">
-                    <FileText className="h-4 w-4 mr-2 text-gray-500" />
-                    Prompt de Comando do Bot (Comportamento)
-                  </label>
-                  <Textarea
-                    id="systemPrompt"
-                    placeholder="Ex: Você é um assistente virtual da Loja X, especializado em responder dúvidas sobre produtos e horários de funcionamento. Seja sempre cordial e prestativo..."
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={6}
-                    className="w-full resize-none"
-                  />
-                   <p className="text-xs text-gray-500">Descreva como o bot deve se comportar, seu tom e sua persona.</p>
+                {useGeminiAI && (
+                    <>
+                        <div className="space-y-2">
+                            <label htmlFor="geminiApiKey" className="flex items-center text-sm font-medium text-gray-700">
+                                <KeyRound className="h-4 w-4 mr-2 text-gray-500" />
+                                API Key do Gemini
+                            </label>
+                            <Input
+                                id="geminiApiKey"
+                                type="password"
+                                placeholder="Cole sua API Key do Google Gemini aqui"
+                                value={geminiApiKey}
+                                onChange={(e) => setGeminiApiKey(e.target.value)}
+                                className="w-full"
+                            />
+                            <p className="text-xs text-gray-500">Sua chave será armazenada de forma segura no servidor.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label htmlFor="systemPrompt" className="flex items-center text-sm font-medium text-gray-700">
+                                <FileText className="h-4 w-4 mr-2 text-gray-500" />
+                                Prompt de Comando do Bot (Comportamento)
+                            </label>
+                            <Textarea
+                                id="systemPrompt"
+                                placeholder="Ex: Você é um assistente virtual da Loja X, especializado em responder dúvidas sobre produtos e horários de funcionamento. Seja sempre cordial e prestativo..."
+                                value={systemPrompt}
+                                onChange={(e) => setSystemPrompt(e.target.value)}
+                                rows={6}
+                                className="w-full resize-none"
+                            />
+                            <p className="text-xs text-gray-500">Descreva como o bot deve se comportar, seu tone e sua persona.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label htmlFor="faqFile" className="flex items-center text-sm font-medium text-gray-700">
+                                <FileText className="h-4 w-4 mr-2 text-gray-500" />
+                                Arquivo de FAQ (faq.txt)
+                            </label>
+                            <Input
+                                id="faqFile"
+                                type="file"
+                                accept=".txt"
+                                onChange={handleFaqFileChange}
+                                className="w-full"
+                            />
+                            <p className="text-xs text-gray-500">
+                                Forneça um arquivo de texto simples (`faq.txt`) com perguntas e respostas para treinar o bot.
+                                Arquivo atual: <span className="font-semibold">{faqFileName}</span>
+                            </p>
+                        </div>
+                    </>
+                )}
+
+                {/* Seção de Respostas Personalizadas */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center space-x-3">
+                        <ListTodo className="h-5 w-5 text-blue-600" />
+                        <div>
+                            <h4 className="font-semibold text-gray-800">Usar Respostas Personalizadas (Menu)</h4>
+                            <p className="text-sm text-gray-600">Define respostas automáticas baseadas em palavras-chave exatas.</p>
+                        </div>
+                    </div>
+                    <Switch
+                        checked={useCustomResponses}
+                        onCheckedChange={(checked) => {
+                            setUseCustomResponses(checked);
+                            if (checked) {
+                                setUseGeminiAI(false);
+                            }
+                        }}
+                        id="toggle-custom-responses"
+                    />
                 </div>
 
-                <div className="space-y-2">
-                  <label htmlFor="faqFile" className="flex items-center text-sm font-medium text-gray-700">
-                    <FileText className="h-4 w-4 mr-2 text-gray-500" />
-                    Arquivo de FAQ (faq.txt)
-                  </label>
-                  <Input
-                    id="faqFile"
-                    type="file"
-                    accept=".txt"
-                    onChange={handleFaqFileChange}
-                    className="w-full"
-                  />
-                  <p className="text-xs text-gray-500">
-                    Forneça um arquivo de texto simples (`faq.txt`) com perguntas e respostas para treinar o bot. 
-                    Arquivo atual: <span className="font-semibold">{faqFileName}</span>
-                  </p>
-                </div>
-                
+                {useCustomResponses && (
+                    <div className="space-y-4 border p-4 rounded-lg bg-white">
+                        <h4 className="text-lg font-semibold text-gray-800 flex items-center">
+                            Editor de Menu de Respostas
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleAddOption}
+                                className="ml-auto flex items-center space-x-1"
+                            >
+                                <PlusCircle className="h-4 w-4" />
+                                <span>Adicionar Opção</span>
+                            </Button>
+                        </h4>
+                        <p className="text-sm text-gray-600 mb-4">
+                            Defina palavras-chave (ex: "1", "menu", "horário") e as mensagens que o bot deve enviar em resposta.
+                        </p>
+
+                        {Object.keys(customResponses).length === 0 && (
+                            <p className="text-center text-gray-500 py-4">Nenhuma resposta personalizada adicionada ainda. Clique em "Adicionar Opção" para começar.</p>
+                        )}
+
+                        {Object.keys(customResponses).sort((a,b) => a.localeCompare(b)).map((key) => (
+                            <Card key={`option-${key}`} className="p-4 border-l-4 border-blue-500 shadow-sm">
+                                <CardHeader className="flex flex-row items-center justify-between p-0 pb-2">
+                                    <Input
+                                        value={key}
+                                        onChange={(e) => handleUpdateOptionKey(key, e.target.value)}
+                                        placeholder="Digite a palavra-chave (ex: '1', 'menu')"
+                                        className="text-base font-semibold border-b border-gray-300 focus:border-blue-500 px-0 py-0 h-auto flex-1 mr-2"
+                                    />
+                                    <Button variant="ghost" size="sm" onClick={() => handleRemoveOption(key)}>
+                                        <Trash2 className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                </CardHeader>
+                                <CardContent className="space-y-3 p-0 pt-2">
+                                    {customResponses[key].map((msg, messageIndex) => (
+                                        <div key={messageIndex} className="relative p-3 border rounded-md bg-slate-50">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Textarea
+                                                    placeholder="Texto da mensagem"
+                                                    value={msg.text}
+                                                    onChange={(e) => handleMessageChange(key, messageIndex, 'text', e.target.value)}
+                                                    rows={2}
+                                                    className="flex-grow resize-none"
+                                                />
+                                                <Input
+                                                    type="number"
+                                                    placeholder="Delay (ms)"
+                                                    value={msg.delay}
+                                                    onChange={(e) => handleMessageChange(key, messageIndex, 'delay', parseInt(e.target.value) || 0)}
+                                                    className="w-24"
+                                                />
+                                            </div>
+                                            <Input
+                                                placeholder="Link (opcional)"
+                                                value={msg.link || ''}
+                                                onChange={(e) => handleMessageChange(key, messageIndex, 'link', e.target.value)}
+                                                className="mb-2"
+                                            />
+                                            <Input
+                                                placeholder="URL da Imagem (opcional)"
+                                                value={msg.image || ''}
+                                                onChange={(e) => handleMessageChange(key, messageIndex, 'image', e.target.value)}
+                                            />
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="absolute top-1 right-1 h-6 w-6 p-0"
+                                                onClick={() => handleRemoveMessageFromOption(key, messageIndex)}
+                                            >
+                                                <XCircle className="h-4 w-4 text-gray-500" />
+                                            </Button>
+                                        </div>
+                                    ))}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleAddMessageToOption(key)}
+                                        className="w-full mt-2"
+                                    >
+                                        <PlusCircle className="h-4 w-4 mr-2" /> Adicionar Mensagem
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+
+
                 <div className="flex justify-end pt-4">
-                  <Button 
-                    onClick={handleSaveConfig} 
+                  <Button
+                    onClick={handleSaveConfig}
                     disabled={isSavingConfig}
                     className="bg-green-600 hover:bg-green-700 flex items-center"
                   >
