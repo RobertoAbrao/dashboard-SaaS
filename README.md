@@ -68,7 +68,7 @@ Obs.: Leia o arquivo EXECUTAR.md para mais detalhes.
 | Fase            | Objetivo Principal                      | Foco Técnico                             |
 | --------------- | --------------------------------------- | ---------------------------------------- |
 | 1. Alicerce 🗷️ | Bot funcional + Dashboard ao vivo (MVP) | Baileys, WebSocket, QR Code, UI base     |
-| 2. Expansão 📈  | Dados persistentes + Estatísticas       | Redis/PostgreSQL, Gráficos, Configs      |
+| 2. Expansão 📈  | Dados persistentes + Estatísticas       | Redis/Firebase, Gráficos, Configs      |
 | 3. Produção 🚀  | Segurança + Deploy VPS                  | Docker, Autenticação, SSL, VPS           |
 | 4. SaaS ☁️      | Multiusuário + Recursos Premium         | Multi-tenant, pagamentos, escalabilidade |
 | 5. Sustentar 🌱 | Manutenção e evolução contínua          | Monitoramento, Correções, Novas features |
