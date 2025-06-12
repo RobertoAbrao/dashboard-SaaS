@@ -3,7 +3,7 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2 } from 'lucide-react';
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -12,6 +12,7 @@ import { useWhatsAppConnection, DashboardData, WhatsAppConnectionStatus } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/components/ui/use-toast";
+import KanbanBoard from '@/components/KanbanBoard'; // Importar o novo componente KanbanBoard
 
 interface BotConfig {
   geminiApiKey: string;
@@ -218,7 +219,7 @@ const Index = () => {
         </div>
 
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-1 md:grid-cols-4 bg-white shadow-sm">
+          <TabsList className="grid w-full grid-cols-1 md:grid-cols-4 lg:grid-cols-5 bg-white shadow-sm"> {/* Adicionado lg:grid-cols-5 */}
              <TabsTrigger value="dashboard" className="flex items-center space-x-2">
               <BarChart3 className="h-4 w-4" />
               <span>Dashboard</span>
@@ -230,6 +231,10 @@ const Index = () => {
             <TabsTrigger value="messages" className="flex items-center space-x-2">
               <Send className="h-4 w-4" />
               <span>Enviar Mensagens</span>
+            </TabsTrigger>
+            <TabsTrigger value="kanban" className="flex items-center space-x-2"> {/* Nova aba Kanban */}
+              <ListTodo className="h-4 w-4" />
+              <span>Kanban</span>
             </TabsTrigger>
             <TabsTrigger value="settings" className="flex items-center space-x-2">
               <Settings className="h-4 w-4" />
@@ -255,6 +260,10 @@ const Index = () => {
                 console.log("onMessageSent callback no Index.tsx");
               }}
             />
+          </TabsContent>
+
+          <TabsContent value="kanban"> {/* Conteúdo da nova aba Kanban */}
+            <KanbanBoard />
           </TabsContent>
 
           <TabsContent value="settings">
