@@ -1118,12 +1118,22 @@ io.on('connection', (socket) => {
 
             const successInfo = `${sentMessageDescription} enviada com sucesso via Baileys. ID da mensagem: ${sentMsgResponse?.key?.id || 'N/A'}`;
             if (typeof callback === 'function') callback({ status: 'success', info: successInfo, messageId: sentMsgResponse?.key?.id });
+            // CÓDIGO ANTIGO QUE CAUSAVA O ERRO:
+            // socket.emit('message_sent_status', {
+            //     to,
+            //     message: mediaInfo ? mediaInfo.caption || message : message,
+            //     status: 'error',
+            //     error: `Falha ao enviar mensagem: ${error.message}` // 'error' aqui está indefinido
+            // });
+
+            // NOVO CÓDIGO NO BLOCO DE SUCESSO:
             socket.emit('message_sent_status', {
                 to,
                 message: mediaInfo ? mediaInfo.caption || message : message,
-                status: 'error',
-                error: `Falha ao enviar mensagem: ${error.message}`
+                status: 'success', // Status correto para sucesso
+                info: successInfo // Informações de sucesso
             });
+
 
             if (mediaInfo && mediaInfo.serverFilePath) {
                 const absoluteMediaPath = path.resolve(__dirname, mediaInfo.serverFilePath);
@@ -1133,10 +1143,18 @@ io.on('connection', (socket) => {
                 });
             }
 
-        } catch (error) {
+        } catch (error) { // 'error' é definido aqui
             console.error(`[MSG SEND FAIL] Erro ao enviar ${messageDescriptionForLog} para ${to}:`, error);
             addActivityLog(`Erro ao enviar ${messageDescriptionForLog} para ${to}: ${error.message}`);
             if (typeof callback === 'function') callback({ status: 'error', error: `Falha ao enviar mensagem: ${error.message}` });
+            // CÓDIGO ANTIGO AQUI (já estava correto para o erro):
+            // socket.emit('message_sent_status', {
+            //     to,
+            //     message: mediaInfo ? mediaInfo.caption || message : message,
+            //     status: 'error',
+            //     error: `Falha ao enviar mensagem: ${error.message}`
+            // });
+            // NOVO CÓDIGO NO BLOCO DE ERRO (redundante, pois o original já estava correto):
             socket.emit('message_sent_status', {
                 to,
                 message: mediaInfo ? mediaInfo.caption || message : message,
