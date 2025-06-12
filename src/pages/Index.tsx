@@ -1,9 +1,8 @@
-// src/pages/Index.tsx
 import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake } from 'lucide-react'; // Importar Handshake
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut } from 'lucide-react'; // Importar LogOut
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -14,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/components/ui/use-toast";
 import KanbanBoard from '@/components/KanbanBoard';
 import { Switch } from '@/components/ui/switch';
+import { useNavigate } from 'react-router-dom'; // Importar useNavigate
 
 interface BotConfig {
   geminiApiKey: string;
@@ -35,6 +35,7 @@ interface ResponseMessage {
 const Index = () => {
   const { status: currentStatus, dashboardData, message: hookMessage, socketRef } = useWhatsAppConnection();
   const { toast } = useToast();
+  const navigate = useNavigate(); // Inicializar useNavigate
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -336,6 +337,14 @@ const Index = () => {
     }
   ];
 
+  const handleLogout = () => {
+    localStorage.removeItem('authToken'); // Remove o token
+    navigate('/login'); // Redireciona para a página de login
+    toast({
+      title: "Logout realizado",
+      description: "Você foi desconectado com sucesso.",
+    });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -351,7 +360,13 @@ const Index = () => {
                 <p className="text-sm text-gray-500">Automação profissional para WhatsApp</p>
               </div>
             </div>
-            <BotStatus />
+            <div className="flex items-center space-x-4"> {/* Adicionado um contêiner flexível para status e botão */}
+              <BotStatus />
+              <Button onClick={handleLogout} variant="outline" className="flex items-center space-x-2">
+                <LogOut className="h-4 w-4" />
+                <span>Logout</span>
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -503,7 +518,7 @@ const Index = () => {
                                 Forneça um arquivo de texto simples (`faq.txt`) com perguntas e respostas para treinar o bot.
                                 Arquivo atual: <span className="font-semibold">{faqFileName}</span>
                             </p>
-                        </div>
+                        </div >
                     </>
                 )}
 
