@@ -1,4 +1,5 @@
 // server/prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,74 +10,9 @@ datasource db {
 }
 
 model User {
-  id               String            @id @default(uuid())
-  email            String            @unique
-  passwordHash     String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-
-  // Relações com campos de volta definidos nos outros modelos
-  whatsappSessions WhatsappSession[]
-  kanbanTickets    KanbanTicket[]
-  botConfigs       BotConfig[]
-}
-
-model WhatsappSession {
-  id            String         @id @default(uuid())
-  userId        String
-  phoneNumber   String         @unique // Um telefone por sessão para o sistema SaaS
-  sessionStatus String
-  authFolderPath String
-  lastQrCode    String?
-  isPaused      Boolean        @default(false)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  user          User           @relation(fields: [userId], references: [id]) // Relacionamento com User
-
-  kanbanTickets KanbanTicket[] // Relação com KanbanTicket
-
-  // Relação um-para-um com BotConfig
-  // Este lado NÃO define fields nem references, apenas aponta para a relação nomeada.
-  botConfig     BotConfig?     @relation(name: "WhatsappSessionBotConfig")
-}
-
-model KanbanTicket {
-  id                  String    @id @default(uuid())
-  whatsappSessionId   String
-  clientPhoneNumber   String
-  contactName         String?
-  status              String
-  messagePreview      String?
-  botPaused           Boolean   @default(false)
-  createdAt           DateTime  @default(now())
-  lastMessageTimestamp DateTime @updatedAt
-
-  whatsappSession WhatsappSession @relation(fields: [whatsappSessionId], references: [id]) // Relacionamento com WhatsappSession
-
-  // Adicionado: Relacionamento com User
-  userId              String
-  user                User          @relation(fields: [userId], references: [id])
-}
-
-model BotConfig {
-  id                    String    @id @default(uuid())
-  whatsappSessionId     String    @unique // Garante a unicidade para o relacionamento um-para-um
-  geminiApiKey          String?
-  systemPrompt          String?
-  faqText               String?
-  useGeminiAI           Boolean   @default(true)
-  useCustomResponses    Boolean   @default(false)
-  customResponsesJson   String? // Armazenar JSON stringificado
-  pauseBotKeyword       String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-
-  // Relação um-para-um com WhatsappSession
-  // Este lado define fields e references, e o nome da relação.
-  whatsappSession WhatsappSession @relation(name: "WhatsappSessionBotConfig", fields: [whatsappSessionId], references: [id])
-
-  // Adicionado: Relacionamento com User
-  userId                String
-  user                  User      @relation(fields: [userId], references: [id])
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Armazenaremos o hash da senha aqui
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

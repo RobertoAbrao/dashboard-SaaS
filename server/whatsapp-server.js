@@ -16,6 +16,14 @@ const Redis = require('ioredis');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const multer = require('multer');
 
+// ===========================================
+// NOVIDADE: Importações para Autenticação
+// ===========================================
+const { PrismaClient } = require('@prisma/client'); // Importa o Prisma Client
+const bcrypt = require('bcryptjs'); // Importa bcryptjs para hash de senhas
+const jwt = require('jsonwebtoken'); // Importa jsonwebtoken para JWTs
+// ===========================================
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -30,7 +38,20 @@ let currentQr = null;
 let isConnecting = false;
 const AUTH_FOLDER_PATH = path.join(__dirname, 'baileys_auth_info');
 const frontendBuildPath = path.join(__dirname, '..', 'dist');
+
+// ===========================================
+// NOVIDADE: Middleware para parsear JSON
+// ===========================================
+app.use(express.json()); // Permite que o Express leia corpos de requisição JSON
+// ===========================================
+
 app.use(express.static(frontendBuildPath));
+
+// ===========================================
+// NOVIDADE: Inicializa o Prisma Client
+// ===========================================
+const prisma = new PrismaClient();
+// ===========================================
 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -317,7 +338,7 @@ async function connectToWhatsApp() {
 
                 if (statusCode !== DisconnectReason.loggedOut) {
                     setTimeout(() => {
-                        if (statusCode === DisepageReason.restartRequired) {
+                        if (statusCode === DisconnectReason.restartRequired) {
                             console.log('Erro 515 (restartRequired) detectado. Preparando reconexão...');
                             sock = null;
                         }
@@ -743,6 +764,103 @@ function emitKanbanTickets() {
         console.error('Erro ao emitir tickets Kanban:', error);
     });
 }
+
+// ===========================================
+// NOVIDADE: Middleware para verificar JWT
+// ===========================================
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+    if (token == null) return res.sendStatus(401); // Se não há token, acesso não autorizado
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+        if (err) {
+            console.error('Erro na verificação do token:', err.message);
+            return res.sendStatus(403); // Token inválido ou expirado
+        }
+        req.user = user;
+        next();
+    });
+}
+// ===========================================
+
+// ===========================================
+// NOVIDADE: Rotas de Autenticação
+// ===========================================
+app.post('/api/auth/register', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email e senha são obrigatórios.' });
+    }
+
+    try {
+        // Verifica se o usuário já existe
+        const existingUser = await prisma.user.findUnique({ where: { email } });
+        if (existingUser) {
+            return res.status(409).json({ message: 'Email já registrado.' });
+        }
+
+        // Hash da senha
+        const hashedPassword = await bcrypt.hash(password, 10); // 10 é o saltRounds
+
+        // Cria o usuário no banco de dados
+        const user = await prisma.user.create({
+            data: {
+                email,
+                password: hashedPassword,
+            },
+        });
+        console.log(`Usuário ${user.email} registrado com sucesso.`);
+        addActivityLog(`Novo usuário registrado: ${user.email}`);
+        res.status(201).json({ message: 'Usuário registrado com sucesso.' });
+
+    } catch (error) {
+        console.error('Erro no registro de usuário:', error);
+        res.status(500).json({ message: 'Erro ao registrar usuário. Tente novamente mais tarde.' });
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email e senha são obrigatórios.' });
+    }
+
+    try {
+        // Busca o usuário pelo email
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) {
+            return res.status(401).json({ message: 'Credenciais inválidas.' });
+        }
+
+        // Compara a senha fornecida com o hash armazenado
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json({ message: 'Credenciais inválidas.' });
+        }
+
+        // Gera o token JWT
+        // ATENÇÃO: process.env.JWT_SECRET deve ser configurado no seu arquivo .env
+        const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        console.log(`Usuário ${user.email} logado com sucesso. Token gerado.`);
+        addActivityLog(`Usuário logado: ${user.email}`);
+        res.status(200).json({ message: 'Login bem-sucedido.', token });
+
+    } catch (error) {
+        console.error('Erro no login de usuário:', error);
+        res.status(500).json({ message: 'Erro ao fazer login. Tente novamente mais tarde.' });
+    }
+});
+
+// Exemplo de rota protegida (necessita de token JWT)
+// Você pode aplicar este middleware a outras rotas da sua API conforme necessário.
+app.get('/api/protected-route', authenticateToken, (req, res) => {
+    res.json({ message: `Bem-vindo, ${req.user.email}! Você acessou uma rota protegida.` });
+});
+// ===========================================
 
 io.on('connection', (socket) => {
     const clientId = socket.id;
