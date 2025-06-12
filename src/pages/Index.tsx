@@ -22,7 +22,7 @@ interface BotConfig {
   useGeminiAI: boolean;
   useCustomResponses: boolean;
   customResponses?: { [key: string]: ResponseMessage[] };
-  pauseBotKeyword?: string; // Novo campo
+  pauseBotKeyword?: string;
 }
 
 interface ResponseMessage {
@@ -45,13 +45,16 @@ const Index = () => {
   const [useGeminiAI, setUseGeminiAI] = useState(true);
   const [useCustomResponses, setUseCustomResponses] = useState(false);
   const [customResponses, setCustomResponses] = useState<{ [key: string]: ResponseMessage[] }>({});
-  const [pauseBotKeyword, setPauseBotKeyword] = useState<string>(''); // Estado para a palavra-chave de pausa
+  const [pauseBotKeyword, setPauseBotKeyword] = useState<string>('');
 
   useEffect(() => {
-    if (socketRef?.current && socketRef.current.connected) {
+    // Captura o valor atual do socketRef.current no início do efeito
+    const currentSocket = socketRef.current;
+
+    if (currentSocket && currentSocket.connected) {
       const fetchConfig = () => {
         console.log("Solicitando configurações do bot do servidor...");
-        socketRef.current.emit('get_bot_config', (response: { success: boolean, data?: Partial<BotConfig> & { faqFilename?: string }, message?: string }) => {
+        currentSocket.emit('get_bot_config', (response: { success: boolean, data?: Partial<BotConfig> & { faqFilename?: string }, message?: string }) => {
           if (response.success && response.data) {
             console.log("Configurações recebidas:", response.data);
             setGeminiApiKey(response.data.geminiApiKey || '');
@@ -62,7 +65,7 @@ const Index = () => {
             setUseGeminiAI(response.data.useGeminiAI ?? true);
             setUseCustomResponses(response.data.useCustomResponses ?? false);
             setCustomResponses(response.data.customResponses || {});
-            setPauseBotKeyword(response.data.pauseBotKeyword || ''); // Carrega a palavra-chave de pausa
+            setPauseBotKeyword(response.data.pauseBotKeyword || '');
             toast({ title: "Configurações do Bot Carregadas", description: "Suas configurações anteriores foram carregadas." });
           } else {
             toast({ title: "Erro ao Carregar Configurações", description: response.message || "Não foi possível buscar as configurações.", variant: "destructive" });
@@ -74,10 +77,11 @@ const Index = () => {
         fetchConfig();
       } else {
         const handleReady = () => fetchConfig();
-        socketRef.current.on('ready', handleReady);
+        currentSocket.on('ready', handleReady);
+        // A função de limpeza agora usa a variável capturada 'currentSocket'
         return () => {
-          if (socketRef.current) {
-            socketRef.current.off('ready', handleReady);
+          if (currentSocket) {
+            currentSocket.off('ready', handleReady);
           }
         };
       }
@@ -161,7 +165,7 @@ const Index = () => {
       useGeminiAI,
       useCustomResponses,
       customResponses,
-      pauseBotKeyword, // Salva a palavra-chave de pausa
+      pauseBotKeyword,
     };
 
     console.log("Enviando para salvar config:", configToSave);
@@ -176,6 +180,7 @@ const Index = () => {
     });
   };
 
+  // customResponses foi removido das dependências, pois a atualização é funcional
   const handleAddOption = useCallback(() => {
     setCustomResponses(prev => {
       const existingKeys = Object.keys(prev);
@@ -183,7 +188,7 @@ const Index = () => {
       let counter = 1;
 
       if (existingKeys.length === 0) {
-        newKey = "menu"; // Palavra-chave "menu" em minúsculas
+        newKey = "menu";
         if (existingKeys.some(k => k.toLowerCase() === newKey.toLowerCase())) {
             newKey = `Nova Opção ${counter++}`;
         }
@@ -203,7 +208,7 @@ const Index = () => {
 
       return newState;
     });
-  }, [customResponses]);
+  }, []); // customResponses removido daqui
 
 
   const handleRemoveOption = useCallback((keyToRemove: string) => {
