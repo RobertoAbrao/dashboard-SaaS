@@ -84,7 +84,7 @@ redisClient.on('ready', async () => {
     await initializeRedisData();
     addActivityLog('Servidor principal e Redis totalmente operacionais.');
     emitDashboardData();
-    emitKanbanTickets(); // Emite tickets Kanban ao conectar
+    emitKanbanTickets();
 });
 
 redisClient.on('error', (err) => {
@@ -135,6 +135,7 @@ async function emitDashboardData() {
 
 let useGeminiAI = true;
 let useCustomResponses = false;
+let pauseBotKeyword = ''; // Variável para a palavra-chave de pausa
 
 const CUSTOM_RESPONSES_FILE_PATH = path.join(__dirname, 'custom_responses.json');
 let customResponses = {};
@@ -161,8 +162,6 @@ async function loadCustomResponses() {
 
 async function saveCustomResponses(responses) {
     try {
-        // Ordena as chaves alfabeticamente para garantir uma ordem consistente no arquivo
-        // e no carregamento subsequente. Isso afeta o fallback se 'menu' não for explícito.
         const sortedKeys = Object.keys(responses).sort((a,b) => a.localeCompare(b));
         const sortedResponses = {};
         for (const key of sortedKeys) {
@@ -170,7 +169,7 @@ async function saveCustomResponses(responses) {
         }
 
         fs.writeFileSync(CUSTOM_RESPONSES_FILE_PATH, JSON.stringify(sortedResponses, null, 2), 'utf8');
-        customResponses = sortedResponses; // Atualiza o objeto em memória com a ordem correta
+        customResponses = sortedResponses;
         console.log('✅ Respostas personalizadas salvas com sucesso.');
         addActivityLog('Respostas personalizadas salvas.');
         return true;
@@ -189,7 +188,8 @@ async function initializeRedisData() {
             'bot_config:system_prompt': 'Você é um assistente prestativo.',
             'bot_config:faq_text': 'Nenhum FAQ carregado ainda.',
             'bot_config:use_gemini_ai': 'true',
-            'bot_config:use_custom_responses': 'false'
+            'bot_config:use_custom_responses': 'false',
+            'bot_config:pause_bot_keyword': '' // Novo campo Redis
         };
         for (const key in defaultKeys) {
             const exists = await redisClient.exists(key);
@@ -205,9 +205,11 @@ async function initializeRedisData() {
 
         useGeminiAI = (await redisClient.get('bot_config:use_gemini_ai')) === 'true';
         useCustomResponses = (await redisClient.get('bot_config:use_custom_responses')) === 'true';
-        console.log(`[Redis Init] useGeminiAI: ${useGeminiAI}, useCustomResponses: ${useCustomResponses}`);
+        pauseBotKeyword = await redisClient.get('bot_config:pause_bot_keyword') || ''; // Carrega a palavra-chave de pausa
 
-        await loadCustomResponses(); // Sempre carrega as respostas customizadas ao iniciar
+        console.log(`[Redis Init] useGeminiAI: ${useGeminiAI}, useCustomResponses: ${useCustomResponses}, pauseBotKeyword: "${pauseBotKeyword}"`);
+
+        await loadCustomResponses();
 
         const apiKeyFromRedis = await redisClient.get('bot_config:gemini_api_key');
         if (useGeminiAI && apiKeyFromRedis && apiKeyFromRedis.trim() !== "") {
@@ -255,7 +257,7 @@ app.post('/api/whatsapp/upload-media', upload.single('mediaFile'), (req, res, ne
         success: true,
         filePath: relativeFilePath,
         originalName: req.file.originalname,
-        mimetype: req.file.mimetype,
+        mimetype: req.mimetype,
         serverFileName: req.file.filename
     });
 }, (error, req, res, next) => {
@@ -315,7 +317,7 @@ async function connectToWhatsApp() {
 
                 if (statusCode !== DisconnectReason.loggedOut) {
                     setTimeout(() => {
-                        if (statusCode === DisconnectReason.restartRequired) {
+                        if (statusCode === DisepageReason.restartRequired) {
                             console.log('Erro 515 (restartRequired) detectado. Preparando reconexão...');
                             sock = null;
                         }
@@ -351,7 +353,6 @@ async function connectToWhatsApp() {
                 const messageContent = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
                 const isGroup = remoteJid.endsWith('@g.us');
 
-                // Ignorar mensagens de grupo ou sem conteúdo de texto/mídia
                 if (isGroup) {
                     console.log(`[MSG Recebida] Ignorando mensagem de grupo de ${remoteJid}.`);
                     continue;
@@ -364,7 +365,6 @@ async function connectToWhatsApp() {
                 console.log(`[MSG Recebida] De: ${remoteJid}, Conteúdo: "${messageContent || '[Mídia]'}"`);
                 addActivityLog(`Mensagem recebida de: ${remoteJid}`);
 
-                // Obter nome do contato (se disponível)
                 let contactName = remoteJid;
                 if (sock && sock.contacts) {
                     const contact = sock.contacts[remoteJid];
@@ -375,10 +375,8 @@ async function connectToWhatsApp() {
                     }
                 }
 
-                // Extrair o número de telefone limpo
                 const phoneNumber = remoteJid.split('@')[0];
 
-                // Determine message type
                 let messageType = 'text';
                 if (msg.message.imageMessage) messageType = 'image';
                 else if (msg.message.videoMessage) messageType = 'video';
@@ -399,23 +397,42 @@ async function connectToWhatsApp() {
                 io.emit('new_message_for_kanban_ticket', receivedMessage);
                 await createOrUpdateKanbanTicket(phoneNumber, contactName, messageContent);
 
+                // =============================================================
                 // Lógica de Resposta do Bot
+                // =============================================================
+                // Verifica se o bot está pausado para este contato antes de responder automaticamente
+                const ticket = await getKanbanTicket(phoneNumber); // Busca o ticket para verificar o estado
+                if (ticket && ticket.botPaused) {
+                    console.log(`[Bot Pausado] Bot está pausado para ${phoneNumber}. Ignorando resposta automática.`);
+                    addActivityLog(`Bot pausado para ${phoneNumber}.`);
+                    continue; // Pula a lógica de resposta automática
+                }
+
                 if (useCustomResponses) {
                     console.log("[Bot Response] Usando Respostas Personalizadas.");
                     const normalizedMessageContent = messageContent.trim().toLowerCase();
+                    const normalizedPauseBotKeyword = pauseBotKeyword.trim().toLowerCase(); // Normaliza a palavra-chave de pausa
 
                     let matchedOptionKey = Object.keys(customResponses).find(key => key.toLowerCase() === normalizedMessageContent);
 
-                    // Novo Fallback: Prioriza "menu" se existir, caso contrário, não responde
+                    // Verifica se a mensagem aciona a pausa do bot
+                    if (normalizedPauseBotKeyword && normalizedMessageContent === normalizedPauseBotKeyword) {
+                        console.log(`[Bot Pausado] Mensagem "${messageContent}" acionou a palavra-chave de pausa. Pausando bot para ${phoneNumber}.`);
+                        await setBotPausedStatus(phoneNumber, true); // Pausa o bot para este contato
+                        await sock.sendMessage(remoteJid, { text: "Entendido! Um de nossos atendentes irá te ajudar. Por favor, aguarde." });
+                        addActivityLog(`Bot pausado para ${phoneNumber} por solicitação do cliente.`);
+                        continue; // Não envia mais respostas automáticas após a pausa
+                    }
+
+                    // Fallback: Prioriza "menu" se existir, caso contrário, não responde
                     if (!matchedOptionKey && Object.keys(customResponses).length > 0) {
                         if (customResponses['menu']) { // Verifica se a chave 'menu' existe (já normalizada para minúsculas)
                             matchedOptionKey = 'menu';
                             console.log(`[Bot Response] Nenhuma correspondência exata. Usando a opção "menu" como fallback.`);
                         } else {
-                            // Se 'menu' não existe como opção, o bot não responde a mensagens não reconhecidas
                             console.log("[Bot Response] Nenhuma correspondência exata e a opção 'menu' não está configurada para fallback. Nenhuma resposta enviada.");
                             addActivityLog("Nenhuma resposta personalizada correspondente e 'menu' não configurado para fallback.");
-                            continue; // Pula para a próxima mensagem se não houver fallback
+                            continue;
                         }
                     }
 
@@ -445,12 +462,23 @@ async function connectToWhatsApp() {
                             });
                         }
                     } else {
-                        // Esta condição será atingida se não houver correspondência E NENHUMA opção configurada (orderedKeys.length === 0)
                         console.log("[Bot Response] Nenhuma resposta personalizada configurada. Nenhuma resposta enviada.");
                         addActivityLog("Nenhuma resposta personalizada configurada.");
                     }
                 } else if (useGeminiAI) {
                     console.log("[Bot Response] Usando Bot Inteligente (Gemini).");
+                    // Palavra-chave de pausa também pode funcionar com IA, mas deve ser explícita
+                    const normalizedMessageContent = messageContent.trim().toLowerCase();
+                    const normalizedPauseBotKeyword = pauseBotKeyword.trim().toLowerCase();
+
+                    if (normalizedPauseBotKeyword && normalizedMessageContent === normalizedPauseBotKeyword) {
+                        console.log(`[Bot Pausado] Mensagem "${messageContent}" acionou a palavra-chave de pausa. Pausando bot para ${phoneNumber}.`);
+                        await setBotPausedStatus(phoneNumber, true);
+                        await sock.sendMessage(remoteJid, { text: "Entendido! Um de nossos atendentes irá te ajudar. Por favor, aguarde." });
+                        addActivityLog(`Bot pausado para ${phoneNumber} por solicitação do cliente.`);
+                        continue;
+                    }
+
                     if (!geminiModel || !genAI) {
                         console.log("[Gemini Check] Gemini não inicializado ou desativado. Resposta automática desativada.");
                         addActivityLog("Gemini AI desativado ou não inicializado. Sem resposta automática.");
@@ -506,7 +534,8 @@ async function connectToWhatsApp() {
     }
 }
 
-// Funções Kanban (sem alterações neste momento)
+// Funções Kanban
+// ATENÇÃO: Adicionamos a propriedade 'botPaused' aos tickets no Redis
 async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePreview) {
     if (redisClient.status !== 'ready') {
         console.warn('Redis não está pronto para gerenciar tickets Kanban.');
@@ -523,10 +552,14 @@ async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePrevi
             if (ticketData.status === 'completed') {
                 console.log(`Ticket para ${phoneNumber} estava 'completed'. Movendo para 'pending' devido a nova mensagem.`);
                 ticketData.status = 'pending';
-                addActivityLog(`Ticket ${phoneNumber} movido de 'completed' para 'pending' por nova mensagem.`);
+                ticketData.botPaused = false; // Garante que o bot não está pausado se o ticket volta a ser pendente por nova mensagem
+                addActivityLog(`Ticket ${phoneNumber} movido de 'completed' para 'pending' por nova mensagem. Bot reativado.`);
             }
+            // Atualiza preview e timestamp, mantém botPaused existente se não for 'completed'
             ticketData.messagePreview = messagePreview || ticketData.messagePreview;
             ticketData.lastMessageTimestamp = currentTimestamp;
+            // Se o ticket já existia, mas não estava 'completed' e recebe nova msg, não altera o botPaused
+            // Apenas se ele estava 'completed' e voltou a 'pending' (como acima)
             console.log(`Ticket Kanban atualizado para ${phoneNumber}.`);
             addActivityLog(`Ticket Kanban atualizado para ${phoneNumber}.`);
         } else {
@@ -538,6 +571,7 @@ async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePrevi
                 createdAt: currentTimestamp,
                 lastMessageTimestamp: currentTimestamp,
                 messagePreview: messagePreview,
+                botPaused: false, // Novo ticket inicia com bot não pausado
             };
             console.log(`Novo ticket Kanban criado para ${phoneNumber}.`);
             addActivityLog(`Novo ticket Kanban criado para ${phoneNumber}.`);
@@ -546,6 +580,48 @@ async function createOrUpdateKanbanTicket(phoneNumber, contactName, messagePrevi
         emitKanbanTickets();
     } catch (error) {
         console.error('Erro ao criar/atualizar ticket Kanban no Redis:', error);
+    }
+}
+
+async function getKanbanTicket(phoneNumber) {
+    if (redisClient.status !== 'ready') {
+        console.warn('Redis não está pronto. Não foi possível buscar ticket Kanban.');
+        return null;
+    }
+    const ticketKey = `kanban:ticket:${phoneNumber}`;
+    try {
+        const ticketData = await redisClient.get(ticketKey);
+        return ticketData ? JSON.parse(ticketData) : null;
+    } catch (error) {
+        console.error(`Erro ao buscar ticket Kanban para ${phoneNumber} do Redis:`, error);
+        return null;
+    }
+}
+
+
+// Nova função para definir o status de pausa do bot para um contato
+async function setBotPausedStatus(phoneNumber, isPaused) {
+    if (redisClient.status !== 'ready') {
+        console.warn('Redis não está pronto. Não foi possível definir o status de pausa do bot.');
+        return false;
+    }
+    const ticketKey = `kanban:ticket:${phoneNumber}`;
+    try {
+        const existingTicket = await redisClient.get(ticketKey);
+        if (existingTicket) {
+            const ticketData = JSON.parse(existingTicket);
+            ticketData.botPaused = isPaused;
+            await redisClient.set(ticketKey, JSON.stringify(ticketData));
+            addActivityLog(`Status de pausa do bot para ${phoneNumber} definido como: ${isPaused}.`);
+            emitKanbanTickets(); // Emite atualização para o frontend
+            return true;
+        } else {
+            console.warn(`Ticket ${phoneNumber} não encontrado para definir o status de pausa.`);
+            return false;
+        }
+    } catch (error) {
+        console.error(`Erro ao definir status de pausa do bot para ${phoneNumber} no Redis:`, error);
+        return false;
     }
 }
 
@@ -560,6 +636,11 @@ async function updateKanbanTicketStatus(ticketId, newStatus) {
         if (existingTicket) {
             const ticketData = JSON.parse(existingTicket);
             ticketData.status = newStatus;
+            // Se o ticket for movido para 'completed', despausamos o bot
+            if (newStatus === 'completed') {
+                ticketData.botPaused = false;
+                addActivityLog(`Ticket ${ticketId} marcado como 'completed'. Bot reativado para este contato.`);
+            }
             await redisClient.set(ticketKey, JSON.stringify(ticketData));
             addActivityLog(`Status do ticket ${ticketId} atualizado para: ${newStatus}.`);
             emitKanbanTickets();
@@ -742,10 +823,13 @@ io.on('connection', (socket) => {
 
             useGeminiAI = config.useGeminiAI;
             useCustomResponses = config.useCustomResponses;
+            pauseBotKeyword = config.pauseBotKeyword || ''; // Salva a palavra-chave de pausa no backend
 
             await redisClient.set('bot_config:use_gemini_ai', String(useGeminiAI));
             await redisClient.set('bot_config:use_custom_responses', String(useCustomResponses));
-            console.log(`[Save Config] useGeminiAI: ${useGeminiAI}, useCustomResponses: ${useCustomResponses}`);
+            await redisClient.set('bot_config:pause_bot_keyword', pauseBotKeyword); // Salva no Redis
+
+            console.log(`[Save Config] useGeminiAI: ${useGeminiAI}, useCustomResponses: ${useCustomResponses}, pauseBotKeyword: "${pauseBotKeyword}"`);
 
             if (useGeminiAI && config.geminiApiKey) {
                 geminiReInitialized = await initializeGemini(config.geminiApiKey);
@@ -794,6 +878,7 @@ io.on('connection', (socket) => {
 
             const currentUseGeminiAI = (await redisClient.get('bot_config:use_gemini_ai')) === 'true';
             const currentUseCustomResponses = (await redisClient.get('bot_config:use_custom_responses')) === 'true';
+            const currentPauseBotKeyword = await redisClient.get('bot_config:pause_bot_keyword') || ''; // Carrega do Redis
 
             await loadCustomResponses();
 
@@ -806,7 +891,8 @@ io.on('connection', (socket) => {
                         faqFilename: faqFilename,
                         useGeminiAI: currentUseGeminiAI,
                         useCustomResponses: currentUseCustomResponses,
-                        customResponses: customResponses
+                        customResponses: customResponses,
+                        pauseBotKeyword: currentPauseBotKeyword // Envia para o frontend
                     }
                 });
             }

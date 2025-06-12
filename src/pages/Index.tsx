@@ -3,7 +3,7 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle } from 'lucide-react';
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake } from 'lucide-react'; // Importar Handshake
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -22,6 +22,7 @@ interface BotConfig {
   useGeminiAI: boolean;
   useCustomResponses: boolean;
   customResponses?: { [key: string]: ResponseMessage[] };
+  pauseBotKeyword?: string; // Novo campo
 }
 
 interface ResponseMessage {
@@ -44,6 +45,7 @@ const Index = () => {
   const [useGeminiAI, setUseGeminiAI] = useState(true);
   const [useCustomResponses, setUseCustomResponses] = useState(false);
   const [customResponses, setCustomResponses] = useState<{ [key: string]: ResponseMessage[] }>({});
+  const [pauseBotKeyword, setPauseBotKeyword] = useState<string>(''); // Estado para a palavra-chave de pausa
 
   useEffect(() => {
     if (socketRef?.current && socketRef.current.connected) {
@@ -60,6 +62,7 @@ const Index = () => {
             setUseGeminiAI(response.data.useGeminiAI ?? true);
             setUseCustomResponses(response.data.useCustomResponses ?? false);
             setCustomResponses(response.data.customResponses || {});
+            setPauseBotKeyword(response.data.pauseBotKeyword || ''); // Carrega a palavra-chave de pausa
             toast({ title: "Configurações do Bot Carregadas", description: "Suas configurações anteriores foram carregadas." });
           } else {
             toast({ title: "Erro ao Carregar Configurações", description: response.message || "Não foi possível buscar as configurações.", variant: "destructive" });
@@ -158,6 +161,7 @@ const Index = () => {
       useGeminiAI,
       useCustomResponses,
       customResponses,
+      pauseBotKeyword, // Salva a palavra-chave de pausa
     };
 
     console.log("Enviando para salvar config:", configToSave);
@@ -178,31 +182,23 @@ const Index = () => {
       let newKey = `Nova Opção`;
       let counter = 1;
 
-      // Se não houver opções existentes, a primeira será "Menu"
       if (existingKeys.length === 0) {
         newKey = "menu"; // Palavra-chave "menu" em minúsculas
-        // Verifique se já existe "menu" (case-insensitive) antes de atribuir
         if (existingKeys.some(k => k.toLowerCase() === newKey.toLowerCase())) {
-            newKey = `Nova Opção ${counter++}`; // Fallback para "Nova Opção N"
+            newKey = `Nova Opção ${counter++}`;
         }
       } else {
-        // Se já existem opções, encontra um nome "Nova Opção N" não usado
         while (existingKeys.some(k => k.toLowerCase() === newKey.toLowerCase())) {
             newKey = `Nova Opção ${counter++}`;
         }
       }
 
-      // Garante que a nova opção seja adicionada ao final para manter a ordem visual
-      // A persistência no JSON e a lógica de fallback do backend ainda dependerão de ordenar as chaves alfabeticamente ou de uma estrutura de array
-      // Para manter a "ordem" visual e a intenção de "primeira opção criada = menu", a melhor forma é garantir que 'menu' seja a primeira chave alfabeticamente ou forçar a ordem.
-      // Como estamos usando Object.keys().sort() para renderizar, 'menu' (se for a primeira palavra-chave) será a primeira alfabeticamente.
       const newState = { ...prev, [newKey]: [{ text: '', delay: 1000 }] };
 
-      // Para garantir que "menu" seja a primeira chave no objeto, forçamos a recriação do objeto com "menu" na frente, se for o caso.
       if (newKey === "menu" && Object.keys(newState).length > 1) {
           const menuOption = newState["menu"];
           delete newState["menu"];
-          return { "menu": menuOption, ...newState }; // Coloca "menu" no início
+          return { "menu": menuOption, ...newState };
       }
 
       return newState;
@@ -225,14 +221,13 @@ const Index = () => {
       if (!trimmedNewKey) {
         return prev;
       }
-      // Verifica se a nova chave já existe (case-insensitive)
       if (Object.keys(prev).some(k => k.toLowerCase() === trimmedNewKey.toLowerCase() && k.toLowerCase() !== oldKey.toLowerCase())) {
         toast({ title: "Palavra-chave Duplicada", description: `A palavra-chave "${trimmedNewKey}" já existe.`, variant: "destructive" });
         return prev;
       }
 
       const newState: { [key: string]: ResponseMessage[] } = {};
-      const orderedKeys = Object.keys(prev).sort((a,b) => a.localeCompare(b)); // Mantém a ordem alfabética para re-inserção
+      const orderedKeys = Object.keys(prev).sort((a,b) => a.localeCompare(b));
 
       orderedKeys.forEach(key => {
         if (key === oldKey) {
@@ -545,6 +540,25 @@ const Index = () => {
                         <p className="text-sm text-gray-600 mb-4">
                             Defina palavras-chave (ex: "1", "menu", "horário") e as mensagens que o bot deve enviar em resposta.
                         </p>
+
+                        {/* Campo para configurar a palavra-chave que pausa o bot */}
+                        <div className="space-y-2 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                          <label htmlFor="pauseBotKeyword" className="flex items-center text-sm font-medium text-gray-700">
+                              <Handshake className="h-4 w-4 mr-2 text-yellow-600" />
+                              Palavra-chave para Transferir para Atendente (Pausar Bot)
+                          </label>
+                          <Input
+                              id="pauseBotKeyword"
+                              placeholder="Ex: '3', 'atendente', 'falar com alguém'"
+                              value={pauseBotKeyword}
+                              onChange={(e) => setPauseBotKeyword(e.target.value)}
+                              className="w-full"
+                          />
+                          <p className="text-xs text-gray-500">
+                            Quando o cliente digitar esta palavra-chave, o bot pausará as respostas automáticas para esse contato.
+                            O atendimento poderá ser retomado manualmente via Kanban.
+                          </p>
+                        </div>
 
                         {Object.keys(customResponses).length === 0 && (
                             <p className="text-center text-gray-500 py-4">Nenhuma resposta personalizada adicionada ainda. Clique em "Adicionar Opção" para começar.</p>
