@@ -1,9 +1,18 @@
 // src/hooks/useWhatsAppConnection.ts
 import { useState, useEffect, useRef, useCallback } from 'react';
 import io, { Socket } from 'socket.io-client';
-import { useAuth } from '@/App';
+// ALTERADO: Corrigindo o caminho da importação do hook useAuth
+import { useAuth } from '@/hooks/useAuth';
 
 // Tipos...
+// Adicionando MediaInfo para o envio de mídias
+export interface MediaInfo {
+  serverFilePath: string;
+  originalName: string;
+  mimetype: string;
+  caption?: string;
+}
+
 export type WhatsAppConnectionStatus = 'offline' | 'connecting_socket' | 'socket_authenticated' | 'initializing' | 'qr_ready' | 'online' | 'auth_failed' | 'disconnected_whatsapp' | 'pairing';
 export interface ActivityLogEntry { message: string; timestamp: string; }
 export interface DashboardData { messagesSent: number; connections: number; botStatus: WhatsAppConnectionStatus; recentActivity: ActivityLogEntry[]; }
@@ -46,7 +55,6 @@ export const useWhatsAppConnection = () => {
     socket.on('connect', async () => {
       const token = await user.getIdToken();
       socket.emit('authenticate', token);
-      setWhatsAppState(prev => ({ ...prev, status: 'socket_authenticated' }));
     });
 
     socket.on('disconnect', () => {
@@ -59,6 +67,8 @@ export const useWhatsAppConnection = () => {
     socket.on('disconnected', (reason: string) => setWhatsAppState(prev => ({...prev, status: 'disconnected_whatsapp', message: `Sessão encerrada: ${reason}` })));
     socket.on('pairing_code', (code: string) => setWhatsAppState(prev => ({...prev, status: 'pairing', pairingCode: code, qrCode: null, message: 'Aguardando confirmação no celular.'})));
     socket.on('dashboard_update', (data: DashboardData) => setWhatsAppState(prev => ({...prev, dashboardData: data, status: data.botStatus })));
+    socket.on('auth_success', () => setWhatsAppState(prev => ({ ...prev, status: 'socket_authenticated' })));
+
 
   }, [user]);
 
@@ -104,10 +114,27 @@ export const useWhatsAppConnection = () => {
     });
   }, [user]);
 
+  // Função para enviar mensagem
+  const sendMessage = useCallback(async (phoneNumber: string, text: string, mediaInfo?: MediaInfo) => {
+    return new Promise<void>((resolve, reject) => {
+      if (!socketRef.current || !socketRef.current.connected) {
+        return reject(new Error('Socket não conectado.'));
+      }
+      socketRef.current.emit('send-message', { to: phoneNumber, text, media: mediaInfo }, (response: { success: boolean, message: string }) => {
+        if (response.success) {
+          resolve();
+        } else {
+          reject(new Error(response.message || 'Erro desconhecido ao enviar mensagem.'));
+        }
+      });
+    });
+  }, []);
+
   return {
     ...whatsAppState,
-    socketRef, // CORREÇÃO: Adicionando o socketRef ao objeto retornado
+    socketRef,
     restartConnection,
     requestPairingCode,
+    sendMessage, // Exportando a nova função
   };
 };

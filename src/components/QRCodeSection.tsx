@@ -1,12 +1,13 @@
 // src/components/QRCodeSection.tsx
-import { useState, useEffect } from 'react'; // ALTERADO: Importando useEffect
+import { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { QrCode, Smartphone, RefreshCw, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { useWhatsAppConnection } from '@/hooks/useWhatsAppConnection';
-import { useAuth } from '@/App';
+// ALTERADO: Corrigindo o caminho da importação
+import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/components/ui/use-toast';
 
 const QRCodeSection = () => {
@@ -18,8 +19,6 @@ const QRCodeSection = () => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isRequestingCode, setIsRequestingCode] = useState(false);
 
-  // CORRIGIDO: Troca de useState para useEffect para lidar com a geração do QR Code.
-  // Isso é um "efeito colateral" que deve ocorrer quando o `qrCode` mudar.
   useEffect(() => {
     if (qrCode) {
       QRCode.toDataURL(qrCode, { width: 256, margin: 1 })
@@ -28,7 +27,7 @@ const QRCodeSection = () => {
     } else {
       setQrCodeDataURL(null);
     }
-  }, [qrCode]); // A dependência [qrCode] garante que isso rode sempre que um novo QR chegar.
+  }, [qrCode]); 
 
   const handleRequestPairingCode = async () => {
     if (!phoneNumber || phoneNumber.length < 10) {
@@ -110,7 +109,7 @@ const QRCodeSection = () => {
               </Button>
               <Button onClick={restartConnection} variant="outline" className="w-full">
                 <RefreshCw className="mr-2" />
-                Gerar QR Code
+                Tentar Reconectar Sessão Existente
               </Button>
             </div>
           )}

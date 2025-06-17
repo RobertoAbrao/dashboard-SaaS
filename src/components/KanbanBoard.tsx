@@ -10,12 +10,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 
-// NOVO: Importações do Firebase e do nosso AuthProvider
-import { db, auth } from '../lib/firebase';
+// Importações do Firebase
+import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
-import { useAuth } from '@/App'; // Usando o contexto de autenticação
+// ALTERADO: Corrigindo o caminho da importação do hook useAuth
+import { useAuth } from '@/hooks/useAuth';
 
-// Interfaces (permanecem as mesmas)
+// Interfaces
 interface Ticket {
   id: string;
   phoneNumber: string;
@@ -26,7 +27,6 @@ interface Ticket {
   lastMessageTimestamp?: string;
 }
 
-// ... (statusMap e statusColors permanecem os mesmos)
 const statusMap = {
   pending: 'Aguardando Atendimento',
   in_progress: 'Em Atendimento',
@@ -43,11 +43,9 @@ const KanbanBoard = () => {
   const { toast } = useToast();
   const { user } = useAuth(); // Pega o usuário logado do contexto
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  // ... (outros estados do modal permanecem os mesmos)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   
-  // ALTERADO: useEffect para escutar o Firestore em tempo real
   useEffect(() => {
     if (!user) return; // Se não há usuário, não faz nada
 
@@ -67,30 +65,26 @@ const KanbanBoard = () => {
     // Função de limpeza para remover o listener quando o componente for desmontado
     return () => unsubscribe();
 
-  }, [user]); // Roda o efeito sempre que o usuário mudar
+  }, [user]);
 
-  // ALTERADO: onDragEnd agora atualiza o documento no Firestore
   const onDragEnd = async (result: DropResult) => {
     const { source, destination, draggableId } = result;
     if (!destination || !user) return;
 
     const newStatus = destination.droppableId as Ticket['status'];
     
-    // Atualiza o estado local imediatamente para uma UI mais rápida
     setTickets(prevTickets => 
       prevTickets.map(ticket => 
         ticket.id === draggableId ? { ...ticket, status: newStatus } : ticket
       )
     );
 
-    // Atualiza o documento no Firestore
     const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', draggableId);
     try {
       await updateDoc(ticketDocRef, { status: newStatus });
       toast({ title: "Ticket Movido", description: `Ticket movido para ${statusMap[newStatus]}.` });
     } catch (error) {
       toast({ title: "Erro ao Mover", description: "Não foi possível atualizar o ticket.", variant: "destructive" });
-      // Reverte o estado local em caso de erro
       setTickets(prevTickets => 
         prevTickets.map(ticket => 
           ticket.id === draggableId ? { ...ticket, status: source.droppableId as Ticket['status'] } : ticket
@@ -99,7 +93,6 @@ const KanbanBoard = () => {
     }
   };
   
-  // ALTERADO: handleCloseTicket agora deleta o documento do Firestore
   const handleCloseTicket = useCallback(async (ticketId: string) => {
     if (!user) return;
     const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', ticketId);
@@ -111,11 +104,6 @@ const KanbanBoard = () => {
     }
   }, [user, toast]);
   
-  // O restante das funções (handleStartChat, handleMarkAsComplete, renderColumn, etc.)
-  // pode permanecer o mesmo, pois elas interagem com o estado local 'tickets' ou chamam
-  // outras funções que já foram adaptadas.
-
-  // ... (cole o resto do seu componente KanbanBoard.tsx aqui, a lógica de renderização não muda)
   const renderColumn = (status: Ticket['status'], title: string) => {
     const columnTickets = tickets.filter(ticket => ticket.status === status);
 
