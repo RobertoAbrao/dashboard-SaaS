@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label';
 import { useToast } from "@/components/ui/use-toast";
 import { Link, useNavigate } from 'react-router-dom';
 import { UserPlus } from 'lucide-react';
+// NOVO: Importações do Firebase
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../lib/firebase'; // Importa a instância de auth
 
 const RegisterPage = () => {
   const [email, setEmail] = useState('');
@@ -18,47 +21,41 @@ const RegisterPage = () => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-
     if (password !== confirmPassword) {
       toast({
         title: "Erro de Cadastro",
         description: "As senhas não coincidem.",
         variant: "destructive",
       });
-      setIsLoading(false);
       return;
     }
+    setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+      // ALTERADO: A lógica de fetch foi substituída pela chamada direta ao Firebase
+      await createUserWithEmailAndPassword(auth, email, password);
 
-      const data = await response.json();
-
-      if (response.ok) {
-        toast({
-          title: "Cadastro Realizado!",
-          description: data.message || "Você foi cadastrado com sucesso. Agora faça login.",
-        });
-        navigate('/login'); // Redireciona para a página de login
-      } else {
-        toast({
-          title: "Erro no Cadastro",
-          description: data.message || "Não foi possível cadastrar o usuário. Tente novamente.",
-          variant: "destructive",
-        });
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Erro de rede ou servidor.";
       toast({
-        title: "Erro de Conexão",
-        description: `Não foi possível conectar ao servidor: ${errorMessage}`,
+        title: "Cadastro Realizado!",
+        description: "Sua conta foi criada. Agora você pode fazer login.",
+      });
+      navigate('/login'); // Redireciona para a página de login após o sucesso
+    
+    } catch (error: unknown) { // Tratamento de erro do Firebase
+      let errorMessage = "Ocorreu um erro desconhecido.";
+      if (error instanceof Error) {
+        // Mapeia os erros comuns do Firebase para mensagens amigáveis
+        if (error.message.includes('auth/email-already-in-use')) {
+          errorMessage = 'Este e-mail já está em uso.';
+        } else if (error.message.includes('auth/weak-password')) {
+          errorMessage = 'A senha deve ter pelo menos 6 caracteres.';
+        } else {
+            errorMessage = error.message;
+        }
+      }
+      toast({
+        title: "Erro no Cadastro",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label';
 import { useToast } from "@/components/ui/use-toast";
 import { Link, useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
+// NOVO: Importações do Firebase
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../lib/firebase'; // Importa a instância de auth
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -20,36 +23,27 @@ const LoginPage = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Salvar o token no localStorage
-        localStorage.setItem('authToken', data.token);
-        toast({
-          title: "Login Bem-sucedido!",
-          description: data.message || "Você foi logado com sucesso.",
-        });
-        navigate('/'); // Redireciona para a página principal (Index)
-      } else {
-        toast({
-          title: "Erro no Login",
-          description: data.message || "Credenciais inválidas. Tente novamente.",
-          variant: "destructive",
-        });
-      }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Erro de rede ou servidor.";
+      // ALTERADO: A lógica de fetch foi substituída pela chamada direta ao Firebase
+      await signInWithEmailAndPassword(auth, email, password);
+      
       toast({
-        title: "Erro de Conexão",
-        description: `Não foi possível conectar ao servidor: ${errorMessage}`,
+        title: "Login Bem-sucedido!",
+        description: "Você será redirecionado para o painel.",
+      });
+      navigate('/'); // O App.tsx irá lidar com o estado de autenticação e redirecionar
+    
+    } catch (error: unknown) { // Tratamento de erro do Firebase
+      let errorMessage = "Credenciais inválidas ou erro de conexão.";
+      if (error instanceof Error) {
+        if (error.message.includes('auth/invalid-credential')) {
+            errorMessage = 'E-mail ou senha inválidos. Por favor, tente novamente.';
+        } else {
+            errorMessage = error.message;
+        }
+      }
+      toast({
+        title: "Erro no Login",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

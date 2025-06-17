@@ -9,6 +9,8 @@ lerna-debug.log*
 
 node_modules
 /server/baileys_auth_info/
+/server/firebase-service-account-key.json
+/server/sessions
 dist
 dist-ssr
 .env

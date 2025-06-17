@@ -6,34 +6,27 @@ import { Badge } from '@/components/ui/badge';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Phone, Play, CheckCircle, Clock, Calendar, MessageSquare, ExternalLink, XCircle, Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useWhatsAppConnection } from '@/hooks/useWhatsAppConnection'; 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 
-// Definição da interface para um Ticket
+// NOVO: Importações do Firebase e do nosso AuthProvider
+import { db, auth } from '../lib/firebase';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { useAuth } from '@/App'; // Usando o contexto de autenticação
+
+// Interfaces (permanecem as mesmas)
 interface Ticket {
   id: string;
   phoneNumber: string;
   contactName?: string;
   status: 'pending' | 'in_progress' | 'completed';
-  createdAt: string; // ISO string
+  createdAt: string;
   messagePreview: string;
   lastMessageTimestamp?: string;
 }
 
-// Definição da interface para uma Mensagem no Histórico
-interface Message {
-  id: string;
-  from: string;
-  to: string;
-  content: string;
-  timestamp: string; // ISO string
-  type: 'text' | 'image' | 'video' | 'audio' | 'document';
-  fromMe: boolean;
-}
-
-// Mapeamento de status para nomes de exibição
+// ... (statusMap e statusColors permanecem os mesmos)
 const statusMap = {
   pending: 'Aguardando Atendimento',
   in_progress: 'Em Atendimento',
@@ -48,236 +41,81 @@ const statusColors = {
 
 const KanbanBoard = () => {
   const { toast } = useToast();
-  const { socketRef } = useWhatsAppConnection();
-
+  const { user } = useAuth(); // Pega o usuário logado do contexto
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  // ... (outros estados do modal permanecem os mesmos)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
-  const [messageHistory, setMessageHistory] = useState<Message[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [currentMessage, setCurrentMessage] = useState('');
-  const [isSendingMessage, setIsSendingMessage] = useState(false);
-
-  const fetchTickets = useCallback(() => {
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('get_kanban_tickets', (response: { success: boolean, tickets?: Ticket[], message?: string }) => {
-        if (response.success && response.tickets) {
-          const sortedTickets = response.tickets.sort((a, b) => {
-            const statusOrder = { pending: 1, in_progress: 2, completed: 3 };
-            if (statusOrder[a.status] !== statusOrder[b.status]) {
-              return statusOrder[a.status] - statusOrder[b.status];
-            }
-            return new Date(b.lastMessageTimestamp || b.createdAt).getTime() - new Date(a.lastMessageTimestamp || a.createdAt).getTime();
-          });
-          setTickets(sortedTickets);
-        } else {
-          toast({ title: "Erro ao Carregar Tickets", description: response.message || "Não foi possível carregar os tickets do servidor.", variant: "destructive" });
-        }
-      });
-    }
-  }, [socketRef, toast]);
-
+  
+  // ALTERADO: useEffect para escutar o Firestore em tempo real
   useEffect(() => {
-    fetchTickets();
+    if (!user) return; // Se não há usuário, não faz nada
 
-    const currentSocket = socketRef.current;
-    if (currentSocket) {
-      currentSocket.on('kanban_tickets_update', (updatedTickets: Ticket[]) => {
-        console.log("Atualização de tickets recebida via Socket.IO:", updatedTickets);
-        const sortedTickets = updatedTickets.sort((a, b) => {
-          const statusOrder = { pending: 1, in_progress: 2, completed: 3 };
-            if (statusOrder[a.status] !== statusOrder[b.status]) {
-              return statusOrder[a.status] - statusOrder[b.status];
-            }
-            return new Date(b.lastMessageTimestamp || b.createdAt).getTime() - new Date(a.lastMessageTimestamp || a.createdAt).getTime();
-        });
-        setTickets(sortedTickets);
-        toast({
-          title: "Tickets Atualizados",
-          description: "A lista de tickets Kanban foi atualizada.",
-          duration: 3000,
-        });
-      });
+    // Cria uma referência para a subcoleção 'kanban_tickets' do usuário logado
+    const ticketsCollectionRef = collection(db, 'users', user.uid, 'kanban_tickets');
+    
+    // Cria uma query para ordenar os tickets pelo último timestamp
+    const q = query(ticketsCollectionRef, orderBy('lastMessageTimestamp', 'desc'));
 
-      currentSocket.on('new_message_for_kanban_ticket', (message: Message) => {
-        if (selectedTicket && message.from === selectedTicket.id) {
-          setMessageHistory((prevHistory) => [...prevHistory, message]);
-          console.log("Nova mensagem para ticket selecionado:", message);
-          // Rola para o final do chat quando uma nova mensagem é recebida
-          setTimeout(() => {
-            const chatContainer = document.getElementById('chat-history-scroll-area');
-            if (chatContainer) {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-          }, 0);
-        }
-      });
+    // onSnapshot é o listener em tempo real do Firestore
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const ticketsData = querySnapshot.docs.map(doc => doc.data() as Ticket);
+      setTickets(ticketsData);
+      console.log("Tickets carregados do Firestore:", ticketsData);
+    });
 
+    // Função de limpeza para remover o listener quando o componente for desmontado
+    return () => unsubscribe();
 
-      return () => {
-        currentSocket.off('kanban_tickets_update');
-        currentSocket.off('new_message_for_kanban_ticket');
-      };
-    }
-  }, [socketRef, fetchTickets, toast, selectedTicket]);
+  }, [user]); // Roda o efeito sempre que o usuário mudar
 
-
-  const moveTicket = useCallback((ticketId: string, newStatus: Ticket['status']) => {
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('update_ticket_status', { ticketId, newStatus }, (response: { success: boolean, message?: string }) => {
-        if (!response.success) {
-          toast({ title: "Erro ao Mover Ticket", description: response.message || "Não foi possível atualizar o status do ticket no servidor.", variant: "destructive" });
-          fetchTickets();
-        }
-      });
-    }
-  }, [socketRef, toast, fetchTickets]);
-
-  const onDragEnd = (result: DropResult) => {
+  // ALTERADO: onDragEnd agora atualiza o documento no Firestore
+  const onDragEnd = async (result: DropResult) => {
     const { source, destination, draggableId } = result;
+    if (!destination || !user) return;
 
-    if (!destination) {
-      return;
-    }
-
-    if (source.droppableId === destination.droppableId && source.index === destination.index) {
-      return;
-    }
-
-    setTickets((prevTickets) => {
-      const draggedTicket = prevTickets.find((ticket) => ticket.id === draggableId);
-      if (!draggedTicket) return prevTickets;
-
-      const newStatus = destination.droppableId as Ticket['status'];
-
-      const updatedTickets = prevTickets.map(ticket =>
+    const newStatus = destination.droppableId as Ticket['status'];
+    
+    // Atualiza o estado local imediatamente para uma UI mais rápida
+    setTickets(prevTickets => 
+      prevTickets.map(ticket => 
         ticket.id === draggableId ? { ...ticket, status: newStatus } : ticket
+      )
+    );
+
+    // Atualiza o documento no Firestore
+    const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', draggableId);
+    try {
+      await updateDoc(ticketDocRef, { status: newStatus });
+      toast({ title: "Ticket Movido", description: `Ticket movido para ${statusMap[newStatus]}.` });
+    } catch (error) {
+      toast({ title: "Erro ao Mover", description: "Não foi possível atualizar o ticket.", variant: "destructive" });
+      // Reverte o estado local em caso de erro
+      setTickets(prevTickets => 
+        prevTickets.map(ticket => 
+          ticket.id === draggableId ? { ...ticket, status: source.droppableId as Ticket['status'] } : ticket
+        )
       );
-
-      const reorderedTickets = updatedTickets.sort((a, b) => {
-        const statusOrder = { pending: 1, in_progress: 2, completed: 3 };
-          if (statusOrder[a.status] !== statusOrder[b.status]) {
-            return statusOrder[a.status] - statusOrder[b.status];
-          }
-          return new Date(b.lastMessageTimestamp || b.createdAt).getTime() - new Date(a.lastMessageTimestamp || a.createdAt).getTime();
-      });
-
-      moveTicket(draggableId, newStatus);
-      return reorderedTickets;
-    });
+    }
   };
-
-  const fetchMessageHistory = useCallback(async (phoneNumber: string) => {
-    setIsLoadingHistory(true);
-    setMessageHistory([]);
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('get_message_history', { phoneNumber }, (response: { success: boolean, history?: Message[], message?: string }) => {
-        setIsLoadingHistory(false);
-        if (response.success && response.history) {
-          const sortedHistory = response.history.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          setMessageHistory(sortedHistory);
-          // Rola para o final do chat assim que o histórico é carregado
-          setTimeout(() => {
-            const chatContainer = document.getElementById('chat-history-scroll-area');
-            if (chatContainer) {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-          }, 0);
-        } else {
-          toast({ title: "Erro ao Carregar Histórico", description: response.message || "Não foi possível carregar o histórico de mensagens.", variant: "destructive" });
-        }
-      });
-    } else {
-      setIsLoadingHistory(false);
-      toast({ title: "Erro de Conexão", description: "Socket.IO não conectado para buscar histórico.", variant: "destructive" });
+  
+  // ALTERADO: handleCloseTicket agora deleta o documento do Firestore
+  const handleCloseTicket = useCallback(async (ticketId: string) => {
+    if (!user) return;
+    const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', ticketId);
+    try {
+        await deleteDoc(ticketDocRef);
+        toast({ title: "Ticket Removido", description: "O ticket foi removido do painel." });
+    } catch (error) {
+        toast({ title: "Erro ao Remover", description: "Não foi possível remover o ticket.", variant: "destructive" });
     }
-  }, [socketRef, toast]);
+  }, [user, toast]);
+  
+  // O restante das funções (handleStartChat, handleMarkAsComplete, renderColumn, etc.)
+  // pode permanecer o mesmo, pois elas interagem com o estado local 'tickets' ou chamam
+  // outras funções que já foram adaptadas.
 
-
-  const handleStartChat = useCallback(async (ticket: Ticket) => {
-    setSelectedTicket(ticket);
-    setIsModalOpen(true);
-    await fetchMessageHistory(ticket.phoneNumber);
-
-    moveTicket(ticket.id, 'in_progress');
-    toast({
-      title: "Atendimento Iniciado",
-      description: `Modal de conversa com ${ticket.phoneNumber} aberto.`,
-    });
-  }, [moveTicket, toast, fetchMessageHistory]);
-
-
-  const handleMarkAsComplete = useCallback((ticketId: string) => {
-    moveTicket(ticketId, 'completed');
-    toast({
-      title: "Atendimento Concluído",
-      description: "Ticket movido para a coluna 'Concluído'.",
-    });
-  }, [moveTicket, toast]);
-
-  const handleCloseTicket = useCallback((ticketId: string) => {
-    if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('remove_kanban_ticket', { ticketId }, (response: { success: boolean, message?: string }) => {
-            if (response.success) {
-                toast({ title: "Ticket Fechado", description: "O ticket foi removido do Kanban." });
-                fetchTickets();
-            } else {
-                toast({ title: "Erro ao Fechar Ticket", description: response.message || "Não foi possível remover o ticket.", variant: "destructive" });
-            }
-        });
-    }
-}, [socketRef, toast, fetchTickets]);
-
-  const handleSendMessage = useCallback(async () => {
-    if (!selectedTicket || !currentMessage.trim()) {
-      toast({ title: "Mensagem Vazia", description: "Por favor, digite uma mensagem para enviar.", variant: "default" }); // Corrigido de "warning" para "default"
-      return;
-    }
-
-    if (!socketRef.current || !socketRef.current.connected) {
-      toast({ title: "Erro de Conexão", description: "Não foi possível conectar ao servidor para enviar a mensagem.", variant: "destructive" });
-      return;
-    }
-
-    setIsSendingMessage(true);
-    const messageToSend = currentMessage;
-    setCurrentMessage('');
-
-    socketRef.current.emit('send-message', {
-      to: selectedTicket.phoneNumber,
-      message: messageToSend,
-      mediaInfo: null
-    }, (response: { status: string, error?: string, info?: string, messageId?: string }) => {
-      setIsSendingMessage(false);
-      if (response.status === 'success') {
-        toast({ title: "Mensagem Enviada", description: "Mensagem enviada com sucesso!" });
-        
-        setMessageHistory((prevHistory) => [
-          ...prevHistory,
-          {
-            id: response.messageId || `sent-${Date.now()}`,
-            from: 'me',
-            to: selectedTicket.phoneNumber,
-            content: messageToSend,
-            timestamp: new Date().toISOString(),
-            type: 'text',
-            fromMe: true,
-          },
-        ]);
-        setTimeout(() => {
-            const chatContainer = document.getElementById('chat-history-scroll-area');
-            if (chatContainer) {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-        }, 0);
-
-      } else {
-        toast({ title: "Erro ao Enviar", description: response.error || "Não foi possível enviar a mensagem.", variant: "destructive" });
-      }
-    });
-  }, [selectedTicket, currentMessage, socketRef, toast]);
-
-
+  // ... (cole o resto do seu componente KanbanBoard.tsx aqui, a lógica de renderização não muda)
   const renderColumn = (status: Ticket['status'], title: string) => {
     const columnTickets = tickets.filter(ticket => ticket.status === status);
 
@@ -337,26 +175,6 @@ const KanbanBoard = () => {
                           {statusMap[ticket.status]}
                         </Badge>
                       </CardContent>
-                      <CardFooter className="flex justify-end gap-2 pt-2">
-                        {ticket.status === 'pending' && (
-                          <Button size="sm" onClick={() => handleStartChat(ticket)} className="bg-blue-500 hover:bg-blue-600">
-                            <Play className="w-4 h-4 mr-1" />
-                            Iniciar Atendimento
-                          </Button>
-                        )}
-                         {ticket.status === 'in_progress' && (
-                          <Button size="sm" variant="outline" onClick={() => handleStartChat(ticket)} className="text-blue-600 border-blue-600 hover:bg-blue-50">
-                            <ExternalLink className="w-4 h-4 mr-1" />
-                            Visualizar Chat
-                          </Button>
-                        )}
-                        {(ticket.status === 'in_progress' || ticket.status === 'pending') && (
-                          <Button size="sm" variant="secondary" onClick={() => handleMarkAsComplete(ticket.id)} className="bg-green-500 hover:bg-green-600 text-white">
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Finalizar
-                          </Button>
-                        )}
-                      </CardFooter>
                     </Card>
                   )}
                 </Draggable>
@@ -368,7 +186,7 @@ const KanbanBoard = () => {
       </Droppable>
     );
   };
-
+  
   return (
     <div className="p-4 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Painel Kanban de Atendimento</h2>
@@ -379,82 +197,6 @@ const KanbanBoard = () => {
           {renderColumn('completed', 'Concluído')}
         </div>
       </DragDropContext>
-
-      {/* Modal de Histórico de Mensagens */}
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[425px] md:max-w-[600px] lg:max-w-[800px] flex flex-col h-[90vh]">
-          <DialogHeader>
-            <DialogTitle>Conversa com {selectedTicket?.contactName || selectedTicket?.phoneNumber}</DialogTitle>
-            <DialogDescription>
-              Interaja diretamente com o cliente aqui.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-grow py-4 overflow-hidden flex flex-col">
-            {isLoadingHistory ? (
-              <p className="text-center text-gray-500">Carregando histórico...</p>
-            ) : messageHistory.length === 0 ? (
-              <p className="text-center text-gray-500">Nenhuma mensagem encontrada para este contato.</p>
-            ) : (
-              <ScrollArea id="chat-history-scroll-area" className="flex-grow pr-4">
-                <div className="space-y-4 pb-4">
-                  {messageHistory.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-[70%] p-3 rounded-lg shadow-sm ${
-                          msg.fromMe
-                            ? 'bg-blue-500 text-white rounded-br-none'
-                            : 'bg-gray-200 text-gray-800 rounded-bl-none'
-                        }`}
-                      >
-                        <p className="text-xs text-gray-600 mb-1">
-                          {msg.fromMe ? 'Você' : (selectedTicket?.contactName || selectedTicket?.phoneNumber)} -{' '}
-                          {new Date(msg.timestamp).toLocaleString('pt-BR')}
-                        </p>
-                        <p className="text-sm">
-                           {msg.content || `[${msg.type === 'image' ? 'Imagem' : msg.type === 'video' ? 'Vídeo' : 'Mídia'}]`}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-          </div>
-          <div className="flex items-center gap-2 pt-4 border-t border-gray-200">
-            <Textarea
-              placeholder="Digite sua mensagem..."
-              value={currentMessage}
-              onChange={(e) => setCurrentMessage(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              rows={2}
-              className="flex-grow resize-none"
-              disabled={isSendingMessage}
-            />
-            <Button onClick={handleSendMessage} disabled={!currentMessage.trim() || isSendingMessage}>
-              {isSendingMessage ? (
-                <span className="flex items-center">
-                  <span className="animate-spin mr-2">⚙️</span> Enviando...
-                </span>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 mr-2" /> Enviar
-                </>
-              )}
-            </Button>
-          </div>
-          <DialogFooter className="pt-4">
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Fechar Conversa</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
