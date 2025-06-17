@@ -11,6 +11,8 @@ node_modules
 /server/baileys_auth_info/
 dist
 dist-ssr
+.env
+.env1
 *.local
 
 
