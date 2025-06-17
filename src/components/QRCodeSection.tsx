@@ -110,7 +110,7 @@ const QRCodeSection = () => {
               </Button>
               <Button onClick={restartConnection} variant="outline" className="w-full">
                 <RefreshCw className="mr-2" />
-                Tentar Reconectar Sessão Existente
+                Gerar QR Code
               </Button>
             </div>
           )}
