@@ -1,4 +1,3 @@
-// server/whatsapp-server.js
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -16,6 +15,7 @@ const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
+const cron = require('node-cron'); // Importa a biblioteca de agendamento
 
 
 const MESSAGES_LIMIT = 100;
@@ -252,12 +252,11 @@ async function emitDashboardDataForUser(userId) {
     io.to(userId).emit('dashboard_update', dashboardPayload);
 }
 
-// NOVO: Função para obter a extensão correta do arquivo
 const getFileExtension = (mediaType) => {
     if (mediaType === 'image') return 'jpg';
     if (mediaType === 'audio') return 'ogg';
     if (mediaType === 'video') return 'mp4';
-    return 'dat'; // Fallback para tipos desconhecidos
+    return 'dat';
 };
 
 async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
@@ -590,7 +589,6 @@ io.on('connection', (socket) => {
                     messagePayload = { image: { url: mediaPath }, caption: text };
                     logPayload = { type: 'image', url: `/media/${media.serverFilePath}`, text: text, sender: 'user', timestamp: new Date().toISOString() };
                 } else if (media.mimetype.startsWith('audio/')) {
-                    // ALTERADO: Adicionado ptt: true para ser interpretado como nota de voz
                     messagePayload = { audio: { url: mediaPath }, mimetype: 'audio/ogg; codecs=opus', ptt: true };
                      logPayload = { type: 'audio', url: `/media/${media.serverFilePath}`, text: '', sender: 'user', timestamp: new Date().toISOString() };
                 } else {
@@ -624,6 +622,78 @@ io.on('connection', (socket) => {
 app.get('*', (req, res) => {
   res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });
+
+// --- INÍCIO DA ROTINA AUTOMÁTICA DE LIMPEZA ---
+
+async function cleanupCompletedTickets() {
+  console.log('[CRON] Iniciando a varredura de tickets concluídos para limpeza.');
+  const usersSnapshot = await db.collection('users').get();
+  
+  if (usersSnapshot.empty) {
+    console.log('[CRON] Nenhum usuário encontrado para verificar.');
+    return;
+  }
+
+  const cleanupPromises = [];
+
+  for (const userDoc of usersSnapshot.docs) {
+    const userId = userDoc.id;
+    console.log(`[CRON] Verificando tickets para o usuário: ${userId}`);
+    
+    const ticketsQuery = db.collection('users').doc(userId).collection('kanban_tickets').where('status', '==', 'completed');
+    const completedTicketsSnapshot = await ticketsQuery.get();
+    
+    if (completedTicketsSnapshot.empty) {
+      console.log(`[CRON] Nenhum ticket concluído para o usuário: ${userId}`);
+      continue;
+    }
+
+    for (const ticketDoc of completedTicketsSnapshot.docs) {
+      const ticketId = ticketDoc.id;
+      const messagesRef = ticketDoc.ref.collection('messages');
+      
+      const cleaningPromise = getDocs(messagesRef).then(async (messagesSnapshot) => {
+        if (messagesSnapshot.empty) {
+          return; // Nenhuma mensagem para limpar
+        }
+        
+        console.log(`[CRON] Limpando ${messagesSnapshot.size} mensagens do ticket ${ticketId} para o usuário ${userId}`);
+        const batch = db.batch();
+        messagesSnapshot.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        
+        // Atualiza a pré-visualização da mensagem para indicar que foi limpo
+        const today = new Date().toLocaleDateString('pt-BR');
+        await ticketDoc.ref.update({ messagePreview: `Histórico limpo em ${today}` });
+      }).catch(error => {
+        console.error(`[CRON] Erro ao limpar mensagens do ticket ${ticketId}:`, error);
+      });
+      
+      cleanupPromises.push(cleaningPromise);
+    }
+  }
+
+  await Promise.all(cleanupPromises);
+  console.log('[CRON] Limpeza diária de tickets concluídos finalizada.');
+}
+
+// Agenda a tarefa para ser executada todos os dias às 23:00h
+cron.schedule('0 23 * * *', () => {
+  console.log('[CRON] Disparando a rotina de limpeza automática de mensagens.');
+  cleanupCompletedTickets().catch(error => {
+    console.error('[CRON] Falha crítica na execução da rotina de limpeza:', error);
+  });
+}, {
+  scheduled: true,
+  timezone: "America/Sao_Paulo"
+});
+
+
+// --- FIM DA ROTINA AUTOMÁTICA DE LIMPEZA ---
+
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
