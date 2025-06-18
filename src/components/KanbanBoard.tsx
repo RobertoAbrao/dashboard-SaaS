@@ -4,13 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Phone, CheckCircle, Clock, Calendar, MessageSquare, XCircle, Loader2, Play, Send, File, Music, Image as ImageIcon, Download } from 'lucide-react';
+import { Phone, CheckCircle, Clock, Calendar, MessageSquare, Trash2, Loader2, Play, Send, File, Music, Image as ImageIcon, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { db } from '../lib/firebase';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, orderBy, getDocs, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { useWhatsAppConnection } from '@/hooks/useWhatsAppConnection';
 import { cn } from '@/lib/utils';
@@ -198,7 +198,7 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
   );
 };
 
-// --- Componente Principal do Kanban (sem alterações) ---
+// --- Componente Principal do Kanban ---
 const KanbanBoard = () => {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -258,19 +258,47 @@ const KanbanBoard = () => {
     handleStatusChange(draggableId, newStatus);
   };
   
-  const handleCloseTicket = useCallback(async (ticketId: string) => {
-    if (!user) return;
-    const originalTickets = [...tickets];
-    setTickets(prevTickets => prevTickets.filter(ticket => ticket.id !== ticketId));
-    const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', ticketId);
-    try {
-        await deleteDoc(ticketDocRef);
-        toast({ title: "Ticket Removido", description: "O ticket foi removido do painel." });
-    } catch (error) {
-        toast({ title: "Erro ao Remover", description: "Não foi possível remover o ticket.", variant: "destructive" });
-        setTickets(originalTickets);
+  const handleClearMessages = useCallback(async (ticketId: string) => {
+    console.log(`[Kanban] Tentando LIMPAR MENSAGENS do ticket com ID: ${ticketId}`);
+    if (!user) {
+        console.error("[Kanban] Erro: Usuário não autenticado.");
+        toast({ title: "Erro de Autenticação", description: "Você precisa estar logado para remover um ticket.", variant: "destructive" });
+        return;
     }
-  }, [user, toast, tickets]);
+
+    const messagesCollectionRef = collection(db, 'users', user.uid, 'kanban_tickets', ticketId, 'messages');
+    
+    try {
+        console.log(`[Kanban] Buscando mensagens para excluir em: ${messagesCollectionRef.path}`);
+        const messagesSnapshot = await getDocs(messagesCollectionRef);
+
+        if (messagesSnapshot.empty) {
+            toast({ title: "Nenhuma Mensagem", description: "O histórico de mensagens já está vazio." });
+            return;
+        }
+
+        const batch = writeBatch(db);
+        messagesSnapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+
+        const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', ticketId);
+        await updateDoc(ticketDocRef, { messagePreview: "Histórico de mensagens limpo." });
+
+        console.log(`[Kanban] ${messagesSnapshot.size} mensagens do ticket ${ticketId} removidas com sucesso.`);
+        toast({ title: "Histórico Limpo", description: `As mensagens do ticket foram removidas com sucesso.` });
+
+    } catch (error) {
+        console.error("[Kanban] Erro ao limpar as mensagens do ticket:", error);
+        toast({
+            title: "Erro ao Limpar Mensagens",
+            description: `Não foi possível remover as mensagens. Verifique as permissões do Firestore.`,
+            variant: "destructive"
+        });
+    }
+  }, [user, toast]);
   
   const renderColumn = (status: Ticket['status'], title: string) => {
     const columnTickets = tickets.filter(ticket => ticket.status === status);
@@ -295,8 +323,8 @@ const KanbanBoard = () => {
                               {ticket.contactName || ticket.phoneNumber}
                             </span>
                             {ticket.status === 'completed' && (
-                               <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleCloseTicket(ticket.id); }} className="h-6 w-6 p-0 text-gray-400 hover:text-red-500">
-                                 <XCircle className="w-4 h-4" />
+                               <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleClearMessages(ticket.id); }} className="h-6 w-6 p-0 text-gray-400 hover:text-red-500" title="Limpar histórico de mensagens">
+                                 <Trash2 className="w-4 h-4" />
                                </Button>
                             )}
                           </CardTitle>
