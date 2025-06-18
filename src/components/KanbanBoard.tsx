@@ -148,7 +148,7 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-xl flex flex-col h-[80vh] max-h-[800px]">
+      <DialogContent className="w-[80vw] max-w-[1200px] h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Conversa com {ticket.contactName || ticket.phoneNumber}</DialogTitle>
           <DialogDescription>Responda ao cliente abaixo.</DialogDescription>
