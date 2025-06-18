@@ -1,67 +1,141 @@
-# WhatsApp Bot SaaS
+# WhatsApp Bot SaaS - Dashboard de Automação
+
+Uma aplicação full-stack que fornece um dashboard para gerenciar e automatizar interações do WhatsApp, utilizando Baileys no backend e React com Vite no frontend.
+
+## 🚀 Principais Funcionalidades
+
+- **Conexão com WhatsApp:** Autenticação via QR Code ou código de pareamento numérico para mais estabilidade.
+- **Dashboard em Tempo Real:** Visualização de status, estatísticas e atividades recentes (via Socket.IO).
+- **Autenticação de Usuários:** Sistema completo de registro e login com Firebase Auth.
+- **Painel Kanban:** Gerenciamento visual de tickets/conversas, com status de "Aguardando", "Em Atendimento" e "Concluído".
+- **Chat Integrado:** Responda conversas diretamente pelo painel através de um modal de chat.
+- **Envio de Mensagens:** Interface para envio de mensagens de texto e mídia (imagens, áudio) para qualquer contato.
+- **Respostas Automáticas Configuráveis:**
+  - **Modo IA (Google Gemini):** Responde usuários com base em um prompt de sistema e um arquivo de FAQ.
+  - **Modo Menu (Respostas Customizadas):** Responde com base em palavras-chave exatas.
+  - **Pausa do Bot:** Pausa a automação para um contato específico através de uma palavra-chave para permitir atendimento humano.
+- **Suporte Multi-Sessão:** A arquitetura é projetada para gerenciar múltiplas sessões de WhatsApp, uma para cada usuário cadastrado.
 
 ## 📦 Tecnologias Utilizadas
 
-* **Vite**
-* **TypeScript**
-* **React**
-* **Tailwind CSS**
-* **shadcn-ui**
+<details>
+  <summary><strong>Frontend</strong></summary>
+  
+  - **Framework/Lib:** React
+  - **Build Tool:** Vite
+  - **Linguagem:** TypeScript
+  - **Estilização:** Tailwind CSS
+  - **Componentes UI:** shadcn/ui (Radix UI)
+  - **Comunicação Real-time:** Socket.IO Client
+  - **Roteamento:** React Router
+  - **Gerenciamento de Estado de Servidor:** TanStack Query
+  - **Autenticação:** Firebase Auth
+  - **Drag and Drop:** @hello-pangea/dnd (para o Kanban)
+</details>
+
+<details>
+  <summary><strong>Backend</strong></summary>
+  
+  - **Ambiente:** Node.js
+  - **Framework:** Express.js
+  - **WhatsApp API (Não-Oficial):** Baileys (`@whiskeysockets/baileys`)
+  - **Comunicação Real-time:** Socket.IO
+  - **Banco de Dados (ORM):** Prisma
+  - **Autenticação e Firestore:** Firebase Admin
+  - **Tokens de Autenticação:** JSON Web Token (JWT)
+  - **Segurança:** bcryptjs para hash de senhas
+</details>
+
+## 📂 Estrutura do Projeto
+
+O projeto é um monorepo com duas partes principais:
+
+- **`/` (root):** Contém a aplicação frontend feita em React/Vite.
+- **`/server`:** Contém o servidor backend em Node.js/Express, responsável por toda a lógica de negócio, incluindo a conexão com o WhatsApp e a comunicação com o banco de dados.
+
+## ⚙️ Configuração de Ambiente
+
+Antes de executar, você precisa configurar as variáveis de ambiente e chaves de serviço.
+
+1.  **Firebase (Backend):**
+    - Renomeie o arquivo de exemplo ou crie `server/firebase-service-account-key.json`.
+    - Insira as credenciais da sua conta de serviço do Firebase neste arquivo. Elas são necessárias para o backend verificar a autenticação dos usuários.
+    - O arquivo está no `.gitignore` para não ser enviado ao seu repositório.
+
+2.  **Banco de Dados (Backend):**
+    - Crie um arquivo chamado `.env` na pasta `/server`.
+    - Adicione a sua connection string do PostgreSQL:
+      ```env
+      DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+      ```
+
+## 🚀 Como Executar o Projeto
+
+Siga estes passos para executar a aplicação completa localmente.
+
+### Pré-requisitos
+
+- **Node.js:** Versão 16 ou superior.
+- **Navegador Web:** Chrome, Firefox, ou similar.
+- **Banco de Dados:** Uma instância do PostgreSQL rodando.
+
+### Passo a Passo
+
+1.  **Instalar dependências do Frontend:**
+    Na pasta raiz do projeto, instale as dependências do React.
+    ```bash
+    npm install
+    ```
+
+2.  **Fazer o Build do Frontend:**
+    Ainda na raiz, gere a versão de produção do frontend.
+    ```bash
+    npm run build
+    ```
+    Isso criará uma pasta `dist` que será servida pelo backend.
+
+3.  **Acessar a pasta do Servidor:**
+    Navegue para a pasta do backend.
+    ```bash
+    cd server
+    ```
+
+4.  **Instalar dependências do Servidor:**
+    Instale as dependências do Node.js, como Express e Baileys.
+    ```bash
+    npm install
+    ```
+
+5.  **Executar as Migrations do Banco de Dados:**
+    Aplique o schema do Prisma ao seu banco de dados.
+    ```bash
+    npx prisma migrate dev
+    ```
+
+6.  **Iniciar o Servidor:**
+    Este comando inicia o servidor Express, que por sua vez serve o frontend e ativa a API do WhatsApp.
+    ```bash
+    npm start
+    ```
+
+7.  **Abrir no Navegador:**
+    Acesse a aplicação no seu navegador. O QR Code para conexão aparecerá na tela.
+    ```
+    http://localhost:3001
+    ```
+   
+
+---
+### Script Rápido (Executa tudo de uma vez)
+A partir da pasta raiz:
+```bash
+npm install && npm run build && cd server && npm install && npx prisma migrate dev && npm start
+```
+
 
 ---
 
-## 🚀 Iniciando o Projeto
-
-### 💻 Usando sua IDE local
-
-1. **Clone o repositório**
-
-   ```bash
-   git clone <YOUR_GIT_URL>
-   ```
-
-2. **Acesse o diretório do projeto**
-
-   ```bash
-   cd <YOUR_PROJECT_NAME>
-   ```
-
-3. **Instale as dependências**
-
-   ```bash
-   npm install && npm run build
-   ```
-
-4. **Inicie o servidor de desenvolvimento**
-
-   ```bash
-   npm run dev
-   ```
-
-> Requisitos: [Node.js e npm instalados com nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Obs.: Leia o arquivo EXECUTAR.md para mais detalhes.
-
----
-
-### ✏️ Editando diretamente no GitHub
-
-1. Acesse o arquivo desejado no repositório.
-2. Clique no ícone de lápis (“Edit”).
-3. Faça suas alterações e clique em “Commit changes”.
-
----
-
-### 🧪 Usando GitHub Codespaces
-
-1. Acesse a página principal do repositório.
-2. Clique no botão verde “Code”.
-3. Va para a aba **Codespaces**.
-4. Clique em “New codespace”.
-
----
-
-## 📺 Roadmap do Projeto
+## 📺 Roadmap do Projeto (Visão Futura)
 
 ### Visão Geral por Fases
 
@@ -84,13 +158,9 @@ Obs.: Leia o arquivo EXECUTAR.md para mais detalhes.
 **Tarefas:**
 
 * 🤖 Conexão com WhatsApp (Baileys)  
-
 * 📊 Dashboard com dados ao vivo  
-
 * 💬 Envio de mensagens com feedback
-
 * 📱 QR Code funcional e renovável
-
 * ⚠️ Tratamento básico de erros
 
 ---
