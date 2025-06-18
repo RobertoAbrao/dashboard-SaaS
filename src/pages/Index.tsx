@@ -3,7 +3,7 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut } from 'lucide-react'; // Importar LogOut
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut, AlertTriangle } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/components/ui/use-toast";
 import KanbanBoard from '@/components/KanbanBoard';
 import { Switch } from '@/components/ui/switch';
-import { useNavigate } from 'react-router-dom'; // Importar useNavigate
+import { useNavigate } from 'react-router-dom';
 
 interface BotConfig {
   geminiApiKey: string;
@@ -34,9 +34,9 @@ interface ResponseMessage {
 }
 
 const Index = () => {
-  const { status: currentStatus, dashboardData, message: hookMessage, socketRef } = useWhatsAppConnection();
+  const { status: currentStatus, dashboardData, socketRef } = useWhatsAppConnection();
   const { toast } = useToast();
-  const navigate = useNavigate(); // Inicializar useNavigate
+  const navigate = useNavigate();
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -50,7 +50,6 @@ const Index = () => {
   const [pauseBotKeyword, setPauseBotKeyword] = useState<string>('');
 
   useEffect(() => {
-    // Captura o valor atual do socketRef.current no início do efeito
     const currentSocket = socketRef.current;
 
     if (currentSocket && currentSocket.connected) {
@@ -80,7 +79,6 @@ const Index = () => {
       } else {
         const handleReady = () => fetchConfig();
         currentSocket.on('ready', handleReady);
-        // A função de limpeza agora usa a variável capturada 'currentSocket'
         return () => {
           if (currentSocket) {
             currentSocket.off('ready', handleReady);
@@ -115,10 +113,10 @@ const Index = () => {
       toast({ title: "Erro de Conexão", description: "Não foi possível conectar ao servidor para salvar.", variant: "destructive" });
       return;
     }
-    if (!useGeminiAI && !useCustomResponses) {
-        toast({ title: "Modo de Atendimento", description: "Pelo menos um modo de atendimento (IA ou Respostas Personalizadas) deve estar ativo.", variant: "destructive" });
-        return;
-    }
+    
+    // REMOVIDO: Bloco que obrigava um bot a estar ativo
+    // if (!useGeminiAI && !useCustomResponses) { ... }
+
     if (useGeminiAI && !geminiApiKey) {
       toast({ title: "API Key Faltando", description: "Por favor, insira a API Key do Gemini.", variant: "destructive" });
       return;
@@ -182,7 +180,6 @@ const Index = () => {
     });
   };
 
-  // customResponses foi removido das dependências, pois a atualização é funcional
   const handleAddOption = useCallback(() => {
     setCustomResponses(prev => {
       const existingKeys = Object.keys(prev);
@@ -210,7 +207,7 @@ const Index = () => {
 
       return newState;
     });
-  }, []); // customResponses removido daqui
+  }, []);
 
 
   const handleRemoveOption = useCallback((keyToRemove: string) => {
@@ -337,8 +334,8 @@ const Index = () => {
   ];
 
   const handleLogout = () => {
-    localStorage.removeItem('authToken'); // Remove o token
-    navigate('/login'); // Redireciona para a página de login
+    localStorage.removeItem('authToken'); 
+    navigate('/login');
     toast({
       title: "Logout realizado",
       description: "Você foi desconectado com sucesso.",
@@ -359,7 +356,7 @@ const Index = () => {
                 <p className="text-sm text-gray-500">Automação profissional para WhatsApp</p>
               </div>
             </div>
-            <div className="flex items-center space-x-4"> {/* Adicionado um contêiner flexível para status e botão */}
+            <div className="flex items-center space-x-4">
               <BotStatus />
               <Button onClick={handleLogout} variant="outline" className="flex items-center space-x-2">
                 <LogOut className="h-4 w-4" />
@@ -442,10 +439,20 @@ const Index = () => {
                   <span>Configurações do Bot Inteligente e Respostas</span>
                 </CardTitle>
                 <CardDescription>
-                  Personalize o comportamento e a base de conhecimento do seu assistente.
+                  Personalize o comportamento e a base de conhecimento do seu assistente. Ative apenas um modo por vez.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* ADICIONADO: Aviso de modo manual */}
+                {!useGeminiAI && !useCustomResponses && (
+                    <div className="p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 border border-yellow-200 flex items-center gap-3">
+                        <AlertTriangle className="h-5 w-5"/>
+                        <div>
+                            <span className="font-semibold">Modo de Atendimento Manual Ativado.</span> Nenhuma resposta automática será enviada pelo bot.
+                        </div>
+                    </div>
+                )}
+
                 {/* Seção de Ativação/Desativação da IA */}
                 <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center space-x-3">
@@ -560,7 +567,6 @@ const Index = () => {
                             Defina palavras-chave (ex: "1", "menu", "horário") e as mensagens que o bot deve enviar em resposta.
                         </p>
 
-                        {/* Campo para configurar a palavra-chave que pausa o bot */}
                         <div className="space-y-2 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
                           <label htmlFor="pauseBotKeyword" className="flex items-center text-sm font-medium text-gray-700">
                               <Handshake className="h-4 w-4 mr-2 text-yellow-600" />
