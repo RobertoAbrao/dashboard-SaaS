@@ -12,13 +12,24 @@ const express = require('express');
 const pino = require('pino');
 const admin = require('firebase-admin');
 
-const serviceAccount = require('./firebase-service-account-key.json');
+// --- INÍCIO: Bloco de inicialização do Firebase ---
+// Garanta que o caminho para o seu arquivo de chave de serviço está correto.
+// O nome 'firebase-service-account-key.json' é o padrão que estamos usando.
+let serviceAccount;
+try {
+  serviceAccount = require('./firebase-service-account-key.json');
+} catch (error) {
+  console.error("ERRO FATAL: O arquivo 'firebase-service-account-key.json' não foi encontrado.");
+  console.error("Por favor, baixe-o do seu console do Firebase e coloque na pasta 'server'.");
+  process.exit(1);
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
 const db = admin.firestore();
+// --- FIM: Bloco de inicialização do Firebase ---
 
 const app = express();
 const server = http.createServer(app);
@@ -30,9 +41,13 @@ const sessions = {};
 const qrCodes = {};
 
 const SESSIONS_DIR = path.join(__dirname, 'sessions');
+// NOVO: Diretório para armazenar dados específicos do usuário, como o FAQ.
+const USER_DATA_DIR = path.join(__dirname, 'user_data');
 const frontendBuildPath = path.join(__dirname, '..', 'dist');
 
 if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+
 
 app.use(express.json());
 app.use(express.static(frontendBuildPath));
@@ -214,7 +229,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   });
 }
 
-// ... (endpoints app.post não precisam de alteração) ...
 app.post('/api/whatsapp/connect', authenticateFirebaseToken, (req, res) => {
     startWhatsAppSession(req.user.uid, null).catch(err => console.error(`Erro ao iniciar sessão para ${req.user.uid}:`, err));
     res.status(200).json({ message: 'Tentando reconectar...' });
@@ -262,7 +276,58 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ATUALIZADO: Garante que o timestamp seja adicionado em mensagens enviadas
+  // --- INÍCIO: NOVOS HANDLERS PARA CONFIGURAÇÃO DO BOT ---
+  socket.on('get_bot_config', async (callback) => {
+      if (!userId) return callback({ success: false, message: "Usuário não autenticado." });
+      try {
+          const configDocRef = db.collection('users').doc(userId).collection('configs').doc('bot_settings');
+          const doc = await configDocRef.get();
+
+          let configData = {};
+          if (doc.exists) {
+              configData = doc.data();
+          }
+
+          // Checa se o arquivo faq.txt existe e envia o nome
+          const faqFilePath = path.join(USER_DATA_DIR, userId, 'faq.txt');
+          if (fs.existsSync(faqFilePath)) {
+              configData.faqFilename = 'faq.txt';
+          }
+
+          callback({ success: true, data: configData });
+      } catch (error) {
+          console.error(`[Config] Erro ao buscar config para ${userId}:`, error);
+          callback({ success: false, message: "Erro interno ao buscar configurações." });
+      }
+  });
+
+  socket.on('save_bot_config', async (config, callback) => {
+      if (!userId) return callback({ success: false, message: "Usuário não autenticado." });
+      try {
+          const { faqText, ...configToSave } = config;
+
+          // Salva as configurações principais no Firestore
+          const configDocRef = db.collection('users').doc(userId).collection('configs').doc('bot_settings');
+          await configDocRef.set(configToSave, { merge: true });
+
+          // Salva o conteúdo do FAQ em um arquivo de texto no servidor
+          if (typeof faqText === 'string' && faqText.length > 0) {
+              const userFaqDir = path.join(USER_DATA_DIR, userId);
+              if (!fs.existsSync(userFaqDir)) {
+                  fs.mkdirSync(userFaqDir, { recursive: true });
+              }
+              const faqFilePath = path.join(userFaqDir, 'faq.txt');
+              fs.writeFileSync(faqFilePath, faqText);
+          }
+
+          callback({ success: true, message: "Configurações salvas com sucesso!" });
+      } catch (error) {
+          console.error(`[Config] Erro ao salvar config para ${userId}:`, error);
+          callback({ success: false, message: "Erro interno ao salvar configurações." });
+      }
+  });
+  // --- FIM: NOVOS HANDLERS PARA CONFIGURAÇÃO DO BOT ---
+
   socket.on('send-message', async ({ to, text }, callback) => {
       if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
       const sock = sessions[userId];
