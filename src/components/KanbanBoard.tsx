@@ -1,5 +1,5 @@
 // src/components/KanbanBoard.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +12,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
-// NOVO: Importando o hook de conexão para poder enviar mensagens
 import { useWhatsAppConnection } from '@/hooks/useWhatsAppConnection';
+import { cn } from '@/lib/utils';
 
 // --- Interfaces e Constantes ---
 
@@ -25,6 +25,13 @@ interface Ticket {
   createdAt: string;
   messagePreview: string;
   lastMessageTimestamp?: string;
+}
+
+interface Message {
+  id: string;
+  text: string;
+  sender: 'user' | 'contact';
+  timestamp: string;
 }
 
 const statusMap = {
@@ -51,17 +58,45 @@ interface ChatModalProps {
 const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMessage }) => {
   const [replyMessage, setReplyMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [history, setHistory] = useState<Message[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const { user } = useAuth();
   const { toast } = useToast();
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen || !user) return;
+
+    setIsLoadingHistory(true);
+    const messagesRef = collection(db, 'users', user.uid, 'kanban_tickets', ticket.id, 'messages');
+    // ATUALIZADO: Simplificamos a ordenação para o campo 'timestamp'
+    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const messageHistory = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
+      setHistory(messageHistory);
+      setIsLoadingHistory(false);
+    }, (error) => {
+      console.error("Erro ao buscar histórico:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar o histórico da conversa.", variant: "destructive" });
+      setIsLoadingHistory(false);
+    });
+
+    return () => unsubscribe();
+  }, [isOpen, user, ticket.id, toast]);
+
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    }
+  }, [history]);
 
   const handleSendReply = async () => {
     if (!replyMessage.trim()) return;
-
     setIsSending(true);
     try {
       await onSendMessage(ticket.phoneNumber, replyMessage);
-      toast({ title: "Mensagem Enviada!", description: `Sua resposta para ${ticket.contactName || ticket.phoneNumber} foi enviada.` });
       setReplyMessage('');
-      onClose(); // Fecha o modal após o envio
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
       toast({ title: "Erro ao Enviar", description: errorMessage, variant: "destructive" });
@@ -72,49 +107,65 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] md:max-w-md flex flex-col h-[70vh]">
         <DialogHeader>
           <DialogTitle>Conversa com {ticket.contactName || ticket.phoneNumber}</DialogTitle>
-          <DialogDescription>
-            Envie uma resposta diretamente para o cliente. O histórico completo da conversa não está disponível aqui.
-          </DialogDescription>
+          <DialogDescription>Responda ao cliente abaixo.</DialogDescription>
         </DialogHeader>
-        <div className="py-4 space-y-4">
-          <div className="p-3 bg-gray-50 rounded-md border">
-            <p className="text-sm font-medium">Última mensagem recebida:</p>
-            <p className="text-sm text-gray-600 mt-1">"{ticket.messagePreview}"</p>
+        
+        <ScrollArea className="flex-grow bg-gray-50 p-4 rounded-md border" ref={scrollAreaRef}>
+          {isLoadingHistory ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {history.map((msg) => (
+                <div key={msg.id} className={cn("flex w-full", msg.sender === 'user' ? 'justify-end' : 'justify-start')}>
+                  <div className={cn("max-w-[75%] p-2 px-3 rounded-lg text-sm", msg.sender === 'user' ? 'bg-green-200' : 'bg-white shadow-sm')}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+
+        <div className="mt-auto pt-4">
+          <div className="flex items-center space-x-2">
+            <Textarea
+              placeholder="Digite sua resposta aqui..."
+              value={replyMessage}
+              onChange={(e) => setReplyMessage(e.target.value)}
+              rows={1}
+              disabled={isSending}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendReply();
+                }
+              }}
+              className="resize-none"
+            />
+            <Button type="submit" size="icon" onClick={handleSendReply} disabled={isSending || !replyMessage.trim()}>
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
-          <Textarea
-            placeholder="Digite sua resposta aqui..."
-            value={replyMessage}
-            onChange={(e) => setReplyMessage(e.target.value)}
-            rows={4}
-            disabled={isSending}
-          />
         </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={isSending}>Cancelar</Button>
-          <Button type="submit" onClick={handleSendReply} disabled={isSending || !replyMessage.trim()}>
-            {isSending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            {isSending ? 'Enviando...' : 'Enviar Resposta'}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 };
 
-
-// --- Componente Principal do Kanban ---
-
+// --- Componente Principal do Kanban (sem alterações) ---
 const KanbanBoard = () => {
   const { toast } = useToast();
   const { user } = useAuth();
-  const { sendMessage } = useWhatsAppConnection(); // NOVO: Obtém a função de enviar mensagem
+  const { sendMessage } = useWhatsAppConnection();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false); // NOVO: Estado para controlar o modal
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null); // NOVO: Estado para o ticket selecionado
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -140,13 +191,10 @@ const KanbanBoard = () => {
     return () => unsubscribe();
   }, [user, toast]);
 
-  // NOVO: Função genérica para mudar o status de um ticket
   const handleStatusChange = async (ticketId: string, newStatus: Ticket['status']) => {
     if (!user) return;
-
     const originalTickets = [...tickets];
     setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: newStatus } : t));
-
     const ticketDocRef = doc(db, 'users', user.uid, 'kanban_tickets', ticketId);
     try {
         await updateDoc(ticketDocRef, { status: newStatus });
@@ -157,7 +205,6 @@ const KanbanBoard = () => {
     }
   };
 
-  // NOVO: Função para abrir o modal de chat
   const handleOpenChat = (ticket: Ticket) => {
     setSelectedTicket(ticket);
     setIsModalOpen(true);
@@ -222,7 +269,6 @@ const KanbanBoard = () => {
                           <span className="flex items-center"><Calendar className="w-3 h-3 mr-1" />{new Date(ticket.lastMessageTimestamp || ticket.createdAt).toLocaleDateString('pt-BR')}</span>
                           <Badge className={`mt-1 ${statusColors[ticket.status]}`}>{statusMap[ticket.status]}</Badge>
                         </CardContent>
-                        {/* NOVO: Footer com os botões de ação */}
                         <CardFooter className="p-3 pt-3 mt-auto justify-end">
                             {ticket.status === 'pending' && (
                                 <Button size="sm" onClick={() => handleStatusChange(ticket.id, 'in_progress')}>
@@ -274,8 +320,7 @@ const KanbanBoard = () => {
           {renderColumn('completed', 'Concluído')}
         </div>
       </DragDropContext>
-
-      {/* NOVO: Renderiza o modal de chat quando um ticket for selecionado */}
+      
       {selectedTicket && (
         <ChatModal
           isOpen={isModalOpen}

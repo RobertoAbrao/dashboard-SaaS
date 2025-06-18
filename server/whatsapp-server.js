@@ -12,10 +12,8 @@ const express = require('express');
 const pino = require('pino');
 const admin = require('firebase-admin');
 
-// Carrega a chave de serviço do Firebase
 const serviceAccount = require('./firebase-service-account-key.json');
 
-// Inicializa o Firebase Admin
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
@@ -51,6 +49,16 @@ async function authenticateFirebaseToken(req, res, next) {
     console.error("Falha na verificação do token:", error);
     return res.sendStatus(403);
   }
+}
+
+// Lógica de log simplificada para usar um timestamp de texto padrão
+async function logMessageToTicket(userId, ticketId, messageData) {
+    try {
+        const messageCollectionRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(ticketId).collection('messages');
+        await messageCollectionRef.add(messageData);
+    } catch (error) {
+        console.error(`[Firestore] Erro ao salvar mensagem no ticket ${ticketId} para usuário ${userId}:`, error);
+    }
 }
 
 async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview) {
@@ -103,28 +111,21 @@ async function emitDashboardDataForUser(userId) {
     io.to(userId).emit('dashboard_update', dashboardPayload);
 }
 
-// =====================================================================================
-// == FUNÇÃO CORRIGIDA ABAIXO ==
-// =====================================================================================
 async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   const sessionFolderPath = path.join(SESSIONS_DIR, userId);
 
-  // ALTERADO: Lógica de limpeza de sessão mais robusta
   if (sessions[userId]) {
     console.log(`[Sessão ${userId}] Desconectando sessão existente antes de iniciar uma nova.`);
     try {
-      // Não espera indefinidamente, apenas envia o comando de logout
-      sessions[userId].logout();
+      await sessions[userId].logout();
     } catch (e) {
-      console.warn(`[Sessão ${userId}] Erro ao deslogar sessão antiga, pode já estar desconectada.`, e.message);
+      console.warn(`[Sessão ${userId}] Erro ao deslogar sessão antiga.`, e.message);
     } finally {
       delete sessions[userId];
     }
   }
 
-  // Se for usar pairing code, é sempre melhor começar com uma sessão 100% limpa.
   if (phoneNumberForPairing && fs.existsSync(sessionFolderPath)) {
-    console.log(`[Sessão ${userId}] Limpando pasta de sessão para novo pareamento com código.`);
     fs.rmSync(sessionFolderPath, { recursive: true, force: true });
   }
 
@@ -138,13 +139,11 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     auth: state,
     logger: pino({ level: 'info' }),
     browser: ['Abrão Tech', 'Chrome', '1.0.0'],
-    // NOVO: Aumenta o timeout de conexão para dar mais tempo ao usuário
     connectTimeoutMs: 60_000,
     syncFullHistory: true, 
   });
 
   sessions[userId] = sock;
-
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
@@ -154,16 +153,12 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     if (qr) {
       if (phoneNumberForPairing) {
         try {
-          console.log(`[Sessão ${userId}] Conexão pronta. Solicitando código para ${phoneNumberForPairing}...`);
           const code = await sock.requestPairingCode(phoneNumberForPairing);
-          console.log(`[Sessão ${userId}] Código de pareamento recebido: ${code}`);
           io.to(userId).emit('pairing_code', code);
         } catch (error) {
-          console.error(`[Sessão ${userId}] Falha CRÍTICA ao solicitar pairing code:`, error);
-          io.to(userId).emit('error', 'Falha ao gerar o código. Tente usar o QR Code ou verifique o console do servidor.');
+          io.to(userId).emit('error', 'Falha ao gerar o código. Tente usar o QR Code.');
         }
       } else {
-        console.log(`[Sessão ${userId}] QR Code gerado. Nenhum número para pareamento fornecido.`);
         qrCodes[userId] = qr;
         io.to(userId).emit('qr', qr);
       }
@@ -172,32 +167,24 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason[statusCode] || 'Desconhecida';
-      console.error(`[Sessão ${userId}] Conexão fechada. Razão: ${reason} (Código: ${statusCode})`);
+      console.error(`[Sessão ${userId}] Conexão fechada. Razão: ${reason}`);
       
       delete sessions[userId];
       delete qrCodes[userId];
       
-      // NOVO: Lógica de reconexão aprimorada
       if (statusCode === DisconnectReason.loggedOut) {
-          console.log(`[Sessão ${userId}] Usuário deslogado. Limpando credenciais...`);
           if (fs.existsSync(sessionFolderPath)) {
               fs.rmSync(sessionFolderPath, { recursive: true, force: true });
           }
-          io.to(userId).emit('disconnected', `Sessão encerrada permanentemente. Por favor, conecte novamente.`);
-      } else if (statusCode === DisconnectReason.restartRequired) {
-          console.log(`[Sessão ${userId}] Reinicialização solicitada pelo WhatsApp (Erro 515). Reconectando imediatamente...`);
-          // Tenta reconectar com os mesmos parâmetros
-          startWhatsAppSession(userId, phoneNumberForPairing).catch(err => console.error(`[Sessão ${userId}] Erro na tentativa de reinicialização:`, err));
-      } else {
-           console.log(`[Sessão ${userId}] Conexão perdida. Tentando reconectar em 15 segundos...`);
-           // Para outras falhas (rede, etc.), tenta reconectar após um tempo
+          io.to(userId).emit('disconnected', `Sessão encerrada permanentemente.`);
+      } else if (statusCode !== DisconnectReason.restartRequired) {
            setTimeout(() => {
-                startWhatsAppSession(userId, phoneNumberForPairing).catch(err => console.error(`[Sessão ${userId}] Erro na tentativa de reconexão:`, err));
+                startWhatsAppSession(userId, null).catch(err => console.error(`[Sessão ${userId}] Erro na reconexão:`, err));
            }, 15000);
-           io.to(userId).emit('disconnected', `Conexão perdida. Tentando reconectar...`);
+           io.to(userId).emit('disconnected', `Conexão perdida. Reconectando...`);
       }
     } else if (connection === 'open') {
-      console.log(`[Sessão ${userId}] Conexão aberta com sucesso.`);
+      console.log(`[Sessão ${userId}] Conexão aberta.`);
       delete qrCodes[userId];
       io.to(userId).emit('ready');
     }
@@ -206,25 +193,33 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   });
   
   sock.ev.on('messages.upsert', async ({ messages }) => {
-    // ... (sua lógica de mensagens permanece igual)
     for (const msg of messages) {
       if (msg.key.fromMe || !msg.message) continue;
       const remoteJid = msg.key.remoteJid;
       if (remoteJid.endsWith('@g.us')) continue;
+
       const messageContent = msg.message.conversation || msg.message.extendedTextMessage?.text || "[Mídia]";
       const contactName = msg.pushName || remoteJid.split('@')[0];
       const phoneNumber = remoteJid.split('@')[0];
+      
       await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messageContent);
+
+      // Loga a mensagem recebida com um timestamp padronizado
+      await logMessageToTicket(userId, phoneNumber, {
+          text: messageContent,
+          sender: 'contact',
+          timestamp: new Date().toISOString()
+      });
     }
   });
 }
-// =====================================================================================
 
+// ... (endpoints app.post não precisam de alteração) ...
 app.post('/api/whatsapp/connect', authenticateFirebaseToken, (req, res) => {
-  startWhatsAppSession(req.user.uid, null).catch(err => console.error(`Erro ao iniciar sessão para ${req.user.uid}:`, err));
-  res.status(200).json({ message: 'Tentando reconectar...' });
+    startWhatsAppSession(req.user.uid, null).catch(err => console.error(`Erro ao iniciar sessão para ${req.user.uid}:`, err));
+    res.status(200).json({ message: 'Tentando reconectar...' });
 });
-
+  
 app.post('/api/whatsapp/request-pairing-code', authenticateFirebaseToken, (req, res) => {
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
@@ -235,35 +230,61 @@ app.post('/api/whatsapp/request-pairing-code', authenticateFirebaseToken, (req, 
 });
 
 app.post('/api/whatsapp/logout', authenticateFirebaseToken, async (req, res) => {
-  const userId = req.user.uid;
-  if (sessions[userId]) {
-    await sessions[userId].logout();
-  }
-  const sessionFolderPath = path.join(SESSIONS_DIR, userId);
-  if (fs.existsSync(sessionFolderPath)) {
-    fs.rmSync(sessionFolderPath, { recursive: true, force: true });
-  }
-  delete sessions[userId];
-  delete qrCodes[userId];
-  res.status(200).json({ message: 'Sessão encerrada com sucesso.' });
+    const userId = req.user.uid;
+    if (sessions[userId]) {
+        await sessions[userId].logout();
+    }
+    const sessionFolderPath = path.join(SESSIONS_DIR, userId);
+    if (fs.existsSync(sessionFolderPath)) {
+        fs.rmSync(sessionFolderPath, { recursive: true, force: true });
+    }
+    delete sessions[userId];
+    delete qrCodes[userId];
+    res.status(200).json({ message: 'Sessão encerrada com sucesso.' });
 });
 
 io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
+  let userId; 
 
   socket.on('authenticate', async (token) => {
     try {
       const decodedToken = await admin.auth().verifyIdToken(token);
-      const userId = decodedToken.uid;
+      userId = decodedToken.uid;
       socket.join(userId);
       console.log(`[Socket Auth] Cliente ${socket.id} autenticado para usuário ${userId}`);
-      
+      socket.emit('auth_success');
       emitDashboardDataForUser(userId);
     } catch (error) {
       console.error("[Socket Auth] Falha na autenticação:", error.message);
       socket.emit('auth_failed', 'Token inválido.');
       socket.disconnect();
     }
+  });
+
+  // ATUALIZADO: Garante que o timestamp seja adicionado em mensagens enviadas
+  socket.on('send-message', async ({ to, text }, callback) => {
+      if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
+      const sock = sessions[userId];
+      if (sock && sock.user) {
+          try {
+              const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
+              await sock.sendMessage(jid, { text });
+              
+              await logMessageToTicket(userId, to.replace(/\D/g, ''), {
+                  text: text,
+                  sender: 'user',
+                  timestamp: new Date().toISOString()
+              });
+
+              callback({ success: true, message: 'Mensagem enviada com sucesso!' });
+          } catch (error) {
+              console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
+              callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
+          }
+      } else {
+          callback({ success: false, message: 'WhatsApp não está conectado.' });
+      }
   });
 
   socket.on('disconnect', () => {
