@@ -3,7 +3,8 @@ const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  delay
+  delay,
+  downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 const { Server } = require('socket.io');
 const http = require('http');
@@ -13,6 +14,9 @@ const express = require('express');
 const pino = require('pino');
 const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
+
 
 const MESSAGES_LIMIT = 100;
 
@@ -45,15 +49,37 @@ const historyCache = {};
 
 const SESSIONS_DIR = path.join(__dirname, 'sessions');
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
+const MEDIA_DIR = path.join(__dirname, 'public', 'media');
 const frontendBuildPath = path.join(__dirname, '..', 'dist');
 
 if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 
 app.use(express.json());
 app.use(express.static(frontendBuildPath));
+app.use('/media', express.static(MEDIA_DIR));
 
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const userId = req.user?.uid;
+        if (!userId) {
+            return cb(new Error('Usuário não autenticado'), '');
+        }
+        const userMediaDir = path.join(MEDIA_DIR, userId);
+        if (!fs.existsSync(userMediaDir)) {
+            fs.mkdirSync(userMediaDir, { recursive: true });
+        }
+        cb(null, userMediaDir);
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({ storage: storage });
 
 async function getBotConfig(userId) {
     if (configCache[userId]) {
@@ -287,9 +313,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
       delete sessions[userId];
       delete qrCodes[userId];
       
-      // --- INÍCIO DA CORREÇÃO ---
-      // Lógica antiga (incorreta): else if (statusCode !== DisconnectReason.restartRequired)
-      // Lógica nova (correta): A reconexão deve ocorrer para qualquer erro que não seja 'loggedOut'.
       if (statusCode !== DisconnectReason.loggedOut) {
            console.log(`[Sessão ${userId}] Tentando reconectar em 15 segundos...`);
            setTimeout(() => {
@@ -303,7 +326,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
           }
           io.to(userId).emit('disconnected', `Sessão encerrada permanentemente.`);
       }
-      // --- FIM DA CORREÇÃO ---
 
     } else if (connection === 'open') {
       console.log(`[Sessão ${userId}] Conexão aberta.`);
@@ -321,18 +343,56 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     const remoteJid = msg.key.remoteJid;
     if (remoteJid.endsWith('@g.us')) return;
 
-    const messageContent = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-    if (!messageContent) return;
-
-    const contactName = msg.pushName || remoteJid.split('@')[0];
     const phoneNumber = remoteJid.split('@')[0];
-    
-    await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messageContent);
-    await logMessageToTicket(userId, phoneNumber, {
-        text: messageContent,
-        sender: 'contact',
-        timestamp: new Date().toISOString()
-    });
+    const contactName = msg.pushName || phoneNumber;
+
+    let messageContent = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+    let messageType = 'text';
+    let mediaUrl = null;
+    let messagePreview = messageContent;
+
+    const msgContent = msg.message;
+    const mediaType = msgContent.imageMessage ? 'image' : msgContent.audioMessage ? 'audio' : msgContent.videoMessage ? 'video' : null;
+
+    if (mediaType) {
+        try {
+            const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'info' }) });
+            const userMediaDir = path.join(MEDIA_DIR, userId);
+            if (!fs.existsSync(userMediaDir)) fs.mkdirSync(userMediaDir, { recursive: true });
+
+            const fileName = `${uuidv4()}.${mediaType === 'image' ? 'jpg' : 'ogg'}`;
+            const filePath = path.join(userMediaDir, fileName);
+            fs.writeFileSync(filePath, buffer);
+
+            mediaUrl = `/media/${userId}/${fileName}`;
+            messageType = mediaType;
+            messagePreview = msgContent.imageMessage?.caption || `[${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)}]`;
+            messageContent = messagePreview; // For AI processing
+
+            await logMessageToTicket(userId, phoneNumber, {
+                type: messageType,
+                url: mediaUrl,
+                sender: 'contact',
+                timestamp: new Date().toISOString(),
+                text: messagePreview
+            });
+
+        } catch (error) {
+            console.error(`[Mídia] Falha ao baixar mídia de ${phoneNumber}:`, error);
+            messagePreview = `[Falha ao baixar ${mediaType}]`;
+            await logMessageToTicket(userId, phoneNumber, { text: messagePreview, sender: 'contact', timestamp: new Date().toISOString(), type: 'text' });
+        }
+    } else {
+        if (!messageContent) return; // Ignore messages without text or known media
+        await logMessageToTicket(userId, phoneNumber, {
+            text: messageContent,
+            sender: 'contact',
+            timestamp: new Date().toISOString(),
+            type: 'text'
+        });
+    }
+
+    await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview);
 
     const config = await getBotConfig(userId);
     if (!config || (!config.useGeminiAI && !config.useCustomResponses)) {
@@ -352,7 +412,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         await ticketRef.update({ botPaused: true });
         const transferMessage = 'Tudo bem, um de nossos atendentes irá te ajudar em breve. Por favor, aguarde.';
         await sock.sendMessage(remoteJid, { text: transferMessage });
-        await logMessageToTicket(userId, phoneNumber, { text: transferMessage, sender: 'user', timestamp: new Date().toISOString() });
+        await logMessageToTicket(userId, phoneNumber, { text: transferMessage, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
         console.log(`[Bot ${userId}] Pausado para ${phoneNumber} pela palavra-chave.`);
         return;
     }
@@ -370,7 +430,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         if (responseMessages && responseMessages.length > 0) {
             for (const resMsg of responseMessages) {
                 await sock.sendMessage(remoteJid, { text: resMsg.text });
-                await logMessageToTicket(userId, phoneNumber, { text: resMsg.text, sender: 'user', timestamp: new Date().toISOString() });
+                await logMessageToTicket(userId, phoneNumber, { text: resMsg.text, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
                 await delay(resMsg.delay || 500);
             }
             responseSent = true;
@@ -388,7 +448,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         );
         if (aiResponse) {
             await sock.sendMessage(remoteJid, { text: aiResponse });
-            await logMessageToTicket(userId, phoneNumber, { text: aiResponse, sender: 'user', timestamp: new Date().toISOString() });
+            await logMessageToTicket(userId, phoneNumber, { text: aiResponse, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
         }
     }
   });
@@ -398,6 +458,21 @@ app.post('/api/whatsapp/connect', authenticateFirebaseToken, (req, res) => {
     startWhatsAppSession(req.user.uid, null).catch(err => console.error(`Erro ao iniciar sessão para ${req.user.uid}:`, err));
     res.status(200).json({ message: 'Tentando reconectar...' });
 });
+
+app.post('/api/whatsapp/upload-media', authenticateFirebaseToken, upload.single('mediaFile'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'Nenhum arquivo enviado.' });
+    }
+    const relativePath = path.join(req.user.uid, req.file.filename);
+    res.json({
+        success: true,
+        message: 'Upload bem-sucedido!',
+        filePath: relativePath,
+        mimetype: req.file.mimetype,
+        originalName: req.file.originalname
+    });
+});
+
   
 app.post('/api/whatsapp/request-pairing-code', authenticateFirebaseToken, (req, res) => {
     const { phoneNumber } = req.body;
@@ -490,28 +565,47 @@ io.on('connection', (socket) => {
       }
   });
   
-  socket.on('send-message', async ({ to, text }, callback) => {
-      if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
-      const sock = sessions[userId];
-      if (sock && sock.user) {
-          try {
-              const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
-              await sock.sendMessage(jid, { text });
-              
-              await logMessageToTicket(userId, to.replace(/\D/g, ''), {
-                  text: text,
-                  sender: 'user',
-                  timestamp: new Date().toISOString()
-              });
+  socket.on('send-message', async ({ to, text, media }, callback) => {
+    if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
+    const sock = sessions[userId];
+    if (sock && sock.user) {
+        try {
+            const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
+            
+            let messagePayload;
+            let logPayload;
 
-              callback({ success: true, message: 'Mensagem enviada com sucesso!' });
-          } catch (error) {
-              console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
-              callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
-          }
-      } else {
-          callback({ success: false, message: 'WhatsApp não está conectado.' });
-      }
+            if (media?.serverFilePath) {
+                const mediaPath = path.join(MEDIA_DIR, media.serverFilePath);
+                
+                if (media.mimetype.startsWith('image/')) {
+                    messagePayload = { image: { url: mediaPath }, caption: text };
+                    logPayload = { type: 'image', url: `/media/${media.serverFilePath}`, text: text, sender: 'user', timestamp: new Date().toISOString() };
+                } else if (media.mimetype.startsWith('audio/')) {
+                    messagePayload = { audio: { url: mediaPath }, mimetype: media.mimetype };
+                     logPayload = { type: 'audio', url: `/media/${media.serverFilePath}`, text: '', sender: 'user', timestamp: new Date().toISOString() };
+                } else {
+                    // Fallback para outros tipos de arquivo, se necessário
+                    messagePayload = { document: { url: mediaPath }, fileName: media.originalName, mimetype: media.mimetype };
+                    logPayload = { type: 'document', url: `/media/${media.serverFilePath}`, text: media.originalName, sender: 'user', timestamp: new Date().toISOString() };
+                }
+
+            } else {
+                messagePayload = { text };
+                logPayload = { text, sender: 'user', timestamp: new Date().toISOString(), type: 'text' };
+            }
+
+            await sock.sendMessage(jid, messagePayload);
+            await logMessageToTicket(userId, to.replace(/\D/g, ''), logPayload);
+
+            callback({ success: true, message: 'Mensagem enviada com sucesso!' });
+        } catch (error) {
+            console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
+            callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
+        }
+    } else {
+        callback({ success: false, message: 'WhatsApp não está conectado.' });
+    }
   });
 
   socket.on('disconnect', () => {
@@ -526,4 +620,10 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
+  // Adiciona a dependência 'uuid' que faltava.
+  const { exec } = require('child_process');
+  exec('npm install uuid', (err, stdout, stderr) => {
+    if (err) { console.error('Erro ao instalar uuid:', stderr); return; }
+    console.log(stdout);
+  });
 });

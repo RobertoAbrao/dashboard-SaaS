@@ -1,3 +1,4 @@
+// src/pages/Index.tsx
 import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -74,7 +75,7 @@ const Index = () => {
         });
       };
 
-      if (currentStatus === 'socket_connected' || currentStatus === 'online') {
+      if (currentStatus === 'socket_authenticated' || currentStatus === 'online') {
         fetchConfig();
       } else {
         const handleReady = () => fetchConfig();
@@ -283,9 +284,8 @@ const Index = () => {
       case 'online': return 'Online';
       case 'qr_ready': return 'Aguardando QR';
       case 'initializing':
-      case 'socket_connected':
-      case 'connecting_socket':
-      case 'authenticated': return 'Conectando';
+      case 'socket_authenticated':
+      case 'connecting_socket': return 'Conectando';
       case 'auth_failed': return 'Falha';
       case 'disconnected_whatsapp': return 'Desconectado';
       default: return 'Offline';
@@ -297,9 +297,8 @@ const Index = () => {
       case 'online': return { color: 'text-green-600', bgColor: 'bg-green-50' };
       case 'qr_ready': return { color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
       case 'initializing':
-      case 'socket_connected':
-      case 'connecting_socket':
-      case 'authenticated': return { color: 'text-blue-600', bgColor: 'bg-blue-50' };
+      case 'socket_authenticated':
+      case 'connecting_socket': return { color: 'text-blue-600', bgColor: 'bg-blue-50' };
       case 'auth_failed':
       case 'disconnected_whatsapp': return { color: 'text-red-600', bgColor: 'bg-red-50' };
       default: return { color: 'text-gray-600', bgColor: 'bg-gray-50' };

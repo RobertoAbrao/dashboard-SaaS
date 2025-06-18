@@ -1,16 +1,12 @@
 // src/hooks/useWhatsAppConnection.ts
 import { useState, useEffect, useRef, useCallback } from 'react';
 import io, { Socket } from 'socket.io-client';
-// ALTERADO: Corrigindo o caminho da importação do hook useAuth
 import { useAuth } from '@/hooks/useAuth';
 
-// Tipos...
-// Adicionando MediaInfo para o envio de mídias
 export interface MediaInfo {
   serverFilePath: string;
   originalName: string;
   mimetype: string;
-  caption?: string;
 }
 
 export type WhatsAppConnectionStatus = 'offline' | 'connecting_socket' | 'socket_authenticated' | 'initializing' | 'qr_ready' | 'online' | 'auth_failed' | 'disconnected_whatsapp' | 'pairing';
@@ -61,7 +57,6 @@ export const useWhatsAppConnection = () => {
       setWhatsAppState(prev => ({...prev, status: 'offline', message: 'Desconectado do servidor.'}));
     });
     
-    // Listeners de eventos
     socket.on('qr', (qr: string) => setWhatsAppState(prev => ({...prev, status: 'qr_ready', qrCode: qr, pairingCode: null})));
     socket.on('ready', () => setWhatsAppState(prev => ({...prev, status: 'online', qrCode: null, pairingCode: null, message: 'Conectado!' })));
     socket.on('disconnected', (reason: string) => setWhatsAppState(prev => ({...prev, status: 'disconnected_whatsapp', message: `Sessão encerrada: ${reason}` })));
@@ -114,7 +109,6 @@ export const useWhatsAppConnection = () => {
     });
   }, [user]);
 
-  // Função para enviar mensagem
   const sendMessage = useCallback(async (phoneNumber: string, text: string, mediaInfo?: MediaInfo) => {
     return new Promise<void>((resolve, reject) => {
       if (!socketRef.current || !socketRef.current.connected) {
@@ -135,6 +129,6 @@ export const useWhatsAppConnection = () => {
     socketRef,
     restartConnection,
     requestPairingCode,
-    sendMessage, // Exportando a nova função
+    sendMessage,
   };
 };

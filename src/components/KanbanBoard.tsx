@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Phone, CheckCircle, Clock, Calendar, MessageSquare, XCircle, Loader2, Play, Send } from 'lucide-react';
+import { Phone, CheckCircle, Clock, Calendar, MessageSquare, XCircle, Loader2, Play, Send, File, Music, Image as ImageIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -32,6 +32,8 @@ interface Message {
   text: string;
   sender: 'user' | 'contact';
   timestamp: string;
+  type: 'text' | 'image' | 'audio' | 'video' | 'document';
+  url?: string;
 }
 
 const statusMap = {
@@ -69,7 +71,6 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
 
     setIsLoadingHistory(true);
     const messagesRef = collection(db, 'users', user.uid, 'kanban_tickets', ticket.id, 'messages');
-    // ATUALIZADO: Simplificamos a ordenação para o campo 'timestamp'
     const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -86,9 +87,14 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
   }, [isOpen, user, ticket.id, toast]);
 
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
+    setTimeout(() => {
+       if (scrollAreaRef.current) {
+         const scrollableNode = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
+         if (scrollableNode) {
+            scrollableNode.scrollTop = scrollableNode.scrollHeight;
+         }
+       }
+    }, 100);
   }, [history]);
 
   const handleSendReply = async () => {
@@ -105,9 +111,34 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
     }
   };
 
+  const renderMessageContent = (msg: Message) => {
+    switch (msg.type) {
+        case 'image':
+            return (
+                <a href={msg.url} target="_blank" rel="noopener noreferrer" className="block">
+                    <img src={msg.url} alt={msg.text || 'Imagem enviada'} className="max-w-full h-auto rounded-md cursor-pointer" />
+                    {msg.text && <p className="text-sm mt-1">{msg.text}</p>}
+                </a>
+            );
+        case 'audio':
+            return <audio controls src={msg.url} className="w-full" />;
+        case 'video':
+            return <video controls src={msg.url} className="max-w-full h-auto rounded-md" />;
+        case 'document':
+             return (
+                <a href={msg.url} target="_blank" rel="noopener noreferrer" className="flex items-center space-x-2 p-2 bg-gray-200 rounded-md hover:bg-gray-300">
+                    <File className="w-5 h-5" />
+                    <span>{msg.text || 'Documento'}</span>
+                </a>
+             );
+        default:
+            return msg.text;
+    }
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] md:max-w-md flex flex-col h-[70vh]">
+      <DialogContent className="sm:max-w-xl flex flex-col h-[80vh] max-h-[800px]">
         <DialogHeader>
           <DialogTitle>Conversa com {ticket.contactName || ticket.phoneNumber}</DialogTitle>
           <DialogDescription>Responda ao cliente abaixo.</DialogDescription>
@@ -122,8 +153,8 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
             <div className="space-y-4">
               {history.map((msg) => (
                 <div key={msg.id} className={cn("flex w-full", msg.sender === 'user' ? 'justify-end' : 'justify-start')}>
-                  <div className={cn("max-w-[75%] p-2 px-3 rounded-lg text-sm", msg.sender === 'user' ? 'bg-green-200' : 'bg-white shadow-sm')}>
-                    {msg.text}
+                  <div className={cn("max-w-[75%] p-2 px-3 rounded-lg text-sm flex flex-col", msg.sender === 'user' ? 'bg-green-200' : 'bg-white shadow-sm')}>
+                    {renderMessageContent(msg)}
                   </div>
                 </div>
               ))}
