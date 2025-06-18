@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Phone, CheckCircle, Clock, Calendar, MessageSquare, XCircle, Loader2, Play, Send, File, Music, Image as ImageIcon } from 'lucide-react';
+import { Phone, CheckCircle, Clock, Calendar, MessageSquare, XCircle, Loader2, Play, Send, File, Music, Image as ImageIcon, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -121,7 +121,17 @@ const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose, ticket, onSendMe
                 </a>
             );
         case 'audio':
-            return <audio controls src={msg.url} className="w-full" />;
+            return (
+                <div className="flex flex-col items-start w-full">
+                    <audio controls src={msg.url} className="w-full">
+                        Seu navegador não suporta o elemento de áudio.
+                    </audio>
+                    <a href={msg.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline mt-1 flex items-center">
+                        <Download className="w-3 h-3 mr-1" />
+                        Baixar áudio
+                    </a>
+                </div>
+            );
         case 'video':
             return <video controls src={msg.url} className="max-w-full h-auto rounded-md" />;
         case 'document':

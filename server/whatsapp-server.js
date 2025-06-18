@@ -252,6 +252,14 @@ async function emitDashboardDataForUser(userId) {
     io.to(userId).emit('dashboard_update', dashboardPayload);
 }
 
+// NOVO: Função para obter a extensão correta do arquivo
+const getFileExtension = (mediaType) => {
+    if (mediaType === 'image') return 'jpg';
+    if (mediaType === 'audio') return 'ogg';
+    if (mediaType === 'video') return 'mp4';
+    return 'dat'; // Fallback para tipos desconhecidos
+};
+
 async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   const sessionFolderPath = path.join(SESSIONS_DIR, userId);
 
@@ -360,14 +368,14 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
             const userMediaDir = path.join(MEDIA_DIR, userId);
             if (!fs.existsSync(userMediaDir)) fs.mkdirSync(userMediaDir, { recursive: true });
 
-            const fileName = `${uuidv4()}.${mediaType === 'image' ? 'jpg' : 'ogg'}`;
+            const fileName = `${uuidv4()}.${getFileExtension(mediaType)}`;
             const filePath = path.join(userMediaDir, fileName);
             fs.writeFileSync(filePath, buffer);
 
             mediaUrl = `/media/${userId}/${fileName}`;
             messageType = mediaType;
             messagePreview = msgContent.imageMessage?.caption || `[${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)}]`;
-            messageContent = messagePreview; // For AI processing
+            messageContent = messagePreview; 
 
             await logMessageToTicket(userId, phoneNumber, {
                 type: messageType,
@@ -383,7 +391,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
             await logMessageToTicket(userId, phoneNumber, { text: messagePreview, sender: 'contact', timestamp: new Date().toISOString(), type: 'text' });
         }
     } else {
-        if (!messageContent) return; // Ignore messages without text or known media
+        if (!messageContent) return; 
         await logMessageToTicket(userId, phoneNumber, {
             text: messageContent,
             sender: 'contact',
@@ -582,10 +590,10 @@ io.on('connection', (socket) => {
                     messagePayload = { image: { url: mediaPath }, caption: text };
                     logPayload = { type: 'image', url: `/media/${media.serverFilePath}`, text: text, sender: 'user', timestamp: new Date().toISOString() };
                 } else if (media.mimetype.startsWith('audio/')) {
-                    messagePayload = { audio: { url: mediaPath }, mimetype: media.mimetype };
+                    // ALTERADO: Adicionado ptt: true para ser interpretado como nota de voz
+                    messagePayload = { audio: { url: mediaPath }, mimetype: 'audio/ogg; codecs=opus', ptt: true };
                      logPayload = { type: 'audio', url: `/media/${media.serverFilePath}`, text: '', sender: 'user', timestamp: new Date().toISOString() };
                 } else {
-                    // Fallback para outros tipos de arquivo, se necessário
                     messagePayload = { document: { url: mediaPath }, fileName: media.originalName, mimetype: media.mimetype };
                     logPayload = { type: 'document', url: `/media/${media.serverFilePath}`, text: media.originalName, sender: 'user', timestamp: new Date().toISOString() };
                 }
@@ -620,10 +628,4 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
-  // Adiciona a dependência 'uuid' que faltava.
-  const { exec } = require('child_process');
-  exec('npm install uuid', (err, stdout, stderr) => {
-    if (err) { console.error('Erro ao instalar uuid:', stderr); return; }
-    console.log(stdout);
-  });
 });
