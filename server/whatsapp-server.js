@@ -14,8 +14,8 @@ const pino = require('pino');
 const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
+const MESSAGES_LIMIT = 100;
 
-// --- Bloco de inicialização do Firebase ---
 let serviceAccount;
 try {
   serviceAccount = require('./firebase-service-account-key.json');
@@ -54,7 +54,6 @@ if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR, { recursive: true
 app.use(express.json());
 app.use(express.static(frontendBuildPath));
 
-// --- Funções Helper para o Bot ---
 
 async function getBotConfig(userId) {
     if (configCache[userId]) {
@@ -155,10 +154,25 @@ async function authenticateFirebaseToken(req, res, next) {
 async function logMessageToTicket(userId, ticketId, messageData) {
     try {
         const messageCollectionRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(ticketId).collection('messages');
+        
         await messageCollectionRef.add(messageData);
+
         delete historyCache[`${userId}-${ticketId}`];
+
+        const snapshot = await messageCollectionRef.orderBy("timestamp", "desc").get();
+        if (snapshot.size > MESSAGES_LIMIT) {
+            const deleteCount = snapshot.size - MESSAGES_LIMIT;
+            const docsToDelete = snapshot.docs.slice(MESSAGES_LIMIT);
+            
+            console.log(`[Cleaner] Ticket ${ticketId}: ${snapshot.size} mensagens. Limite de ${MESSAGES_LIMIT} excedido. Deletando ${deleteCount} mensagens.`);
+            
+            const batch = db.batch();
+            docsToDelete.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+        }
+
     } catch (error) {
-        console.error(`[Firestore] Erro ao salvar mensagem no ticket ${ticketId} para usuário ${userId}:`, error);
+        console.error(`[Firestore] Erro ao salvar/limpar mensagem no ticket ${ticketId} para usuário ${userId}:`, error);
     }
 }
 
@@ -273,17 +287,24 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
       delete sessions[userId];
       delete qrCodes[userId];
       
-      if (statusCode === DisconnectReason.loggedOut) {
+      // --- INÍCIO DA CORREÇÃO ---
+      // Lógica antiga (incorreta): else if (statusCode !== DisconnectReason.restartRequired)
+      // Lógica nova (correta): A reconexão deve ocorrer para qualquer erro que não seja 'loggedOut'.
+      if (statusCode !== DisconnectReason.loggedOut) {
+           console.log(`[Sessão ${userId}] Tentando reconectar em 15 segundos...`);
+           setTimeout(() => {
+                startWhatsAppSession(userId, null).catch(err => console.error(`[Sessão ${userId}] Erro na reconexão automática:`, err));
+           }, 15000);
+           io.to(userId).emit('disconnected', `Conexão perdida. Reconectando...`);
+      } else {
+          console.log(`[Sessão ${userId}] Usuário deslogado. Limpando sessão.`);
           if (fs.existsSync(sessionFolderPath)) {
               fs.rmSync(sessionFolderPath, { recursive: true, force: true });
           }
           io.to(userId).emit('disconnected', `Sessão encerrada permanentemente.`);
-      } else if (statusCode !== DisconnectReason.restartRequired) {
-           setTimeout(() => {
-                startWhatsAppSession(userId, null).catch(err => console.error(`[Sessão ${userId}] Erro na reconexão:`, err));
-           }, 15000);
-           io.to(userId).emit('disconnected', `Conexão perdida. Reconectando...`);
       }
+      // --- FIM DA CORREÇÃO ---
+
     } else if (connection === 'open') {
       console.log(`[Sessão ${userId}] Conexão aberta.`);
       delete qrCodes[userId];
@@ -293,7 +314,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     emitDashboardDataForUser(userId);
   });
   
-  // --- LÓGICA PRINCIPAL DE PROCESSAMENTO DE MENSAGENS ---
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (msg.key.fromMe || !msg.message) return;
@@ -339,12 +359,10 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
 
     let responseSent = false;
 
-    // --- INÍCIO: LÓGICA DE RESPOSTAS PERSONALIZADAS ATUALIZADA ---
     if (config.useCustomResponses && config.customResponses) {
         const responseKey = messageContent.toLowerCase();
         let responseMessages = config.customResponses[responseKey];
 
-        // Se não encontrar uma correspondência exata, usa a opção "menu" como padrão
         if (!responseMessages || responseMessages.length === 0) {
             responseMessages = config.customResponses['menu'];
         }
@@ -358,7 +376,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
             responseSent = true;
         }
     }
-    // --- FIM: LÓGICA DE RESPOSTAS PERSONALIZADAS ATUALIZADA ---
 
     if (!responseSent && config.useGeminiAI && config.geminiApiKey) {
         const history = await getMessageHistory(userId, phoneNumber);
@@ -377,7 +394,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   });
 }
 
-// ... (endpoints e restante do código sem alterações) ...
 app.post('/api/whatsapp/connect', authenticateFirebaseToken, (req, res) => {
     startWhatsAppSession(req.user.uid, null).catch(err => console.error(`Erro ao iniciar sessão para ${req.user.uid}:`, err));
     res.status(200).json({ message: 'Tentando reconectar...' });
