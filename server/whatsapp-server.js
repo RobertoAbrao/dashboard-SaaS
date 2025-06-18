@@ -12,7 +12,6 @@ const path = require('path');
 const express = require('express');
 const pino = require('pino');
 const admin = require('firebase-admin');
-// NOVO: Importando a biblioteca do Google Generative AI
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 
@@ -40,7 +39,6 @@ const io = new Server(server, {
 
 const sessions = {};
 const qrCodes = {};
-// NOVO: Cache para configurações e histórico para evitar múltiplas leituras do DB na mesma interação
 const configCache = {};
 const historyCache = {};
 
@@ -56,13 +54,8 @@ if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR, { recursive: true
 app.use(express.json());
 app.use(express.static(frontendBuildPath));
 
-// --- INÍCIO: NOVAS FUNÇÕES HELPER PARA O BOT ---
+// --- Funções Helper para o Bot ---
 
-/**
- * Busca as configurações do bot para um usuário, usando um cache simples.
- * @param {string} userId - O ID do usuário do Firebase.
- * @returns {Promise<object|null>} As configurações do bot ou nulo se não encontradas.
- */
 async function getBotConfig(userId) {
     if (configCache[userId]) {
         return configCache[userId];
@@ -74,18 +67,17 @@ async function getBotConfig(userId) {
 
         const config = doc.data();
 
-        // Se a IA estiver ativa, carrega o conteúdo do FAQ do arquivo
         if (config.useGeminiAI) {
             const faqFilePath = path.join(USER_DATA_DIR, userId, 'faq.txt');
             if (fs.existsSync(faqFilePath)) {
                 config.faqText = fs.readFileSync(faqFilePath, 'utf-8');
             } else {
-                config.faqText = ''; // Garante que a propriedade exista
+                config.faqText = '';
             }
         }
         
-        configCache[userId] = config; // Armazena no cache
-        setTimeout(() => delete configCache[userId], 5 * 60 * 1000); // Limpa o cache após 5 minutos
+        configCache[userId] = config;
+        setTimeout(() => delete configCache[userId], 5 * 60 * 1000);
         return config;
     } catch (error) {
         console.error(`[Config] Erro ao buscar config para ${userId}:`, error);
@@ -94,12 +86,6 @@ async function getBotConfig(userId) {
 }
 
 
-/**
- * Busca o histórico de mensagens de uma conversa.
- * @param {string} userId - O ID do usuário do Firebase.
- * @param {string} ticketId - O ID do ticket (número do telefone).
- * @returns {Promise<Array<object>>} O histórico de mensagens.
- */
 async function getMessageHistory(userId, ticketId) {
     const cacheKey = `${userId}-${ticketId}`;
     if (historyCache[cacheKey]) {
@@ -107,12 +93,12 @@ async function getMessageHistory(userId, ticketId) {
     }
     try {
         const messagesRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(ticketId).collection('messages');
-        const q = messagesRef.orderBy('timestamp', 'desc').limit(10); // Pega as 10 últimas mensagens
+        const q = messagesRef.orderBy('timestamp', 'desc').limit(10);
         const snapshot = await q.get();
-        const history = snapshot.docs.map(doc => doc.data()).reverse(); // Reverte para ordem cronológica
+        const history = snapshot.docs.map(doc => doc.data()).reverse();
         
         historyCache[cacheKey] = history;
-        setTimeout(() => delete historyCache[cacheKey], 5 * 60 * 1000); // Limpa o cache após 5 minutos
+        setTimeout(() => delete historyCache[cacheKey], 5 * 60 * 1000);
 
         return history;
     } catch (error) {
@@ -121,15 +107,6 @@ async function getMessageHistory(userId, ticketId) {
     }
 }
 
-/**
- * Gera uma resposta usando a API do Google Gemini.
- * @param {string} apiKey - A chave da API do Gemini.
- * @param {string} systemPrompt - O prompt de sistema para o comportamento do bot.
- * @param {string} faqContent - O conteúdo do arquivo FAQ.
- * @param {Array<object>} history - O histórico da conversa.
- * @param {string} currentMessage - A mensagem atual do cliente.
- * @returns {Promise<string|null>} A resposta da IA ou nulo em caso de erro.
- */
 async function getGeminiResponse(apiKey, systemPrompt, faqContent, history, currentMessage) {
     try {
         const genAI = new GoogleGenerativeAI(apiKey);
@@ -161,8 +138,6 @@ async function getGeminiResponse(apiKey, systemPrompt, faqContent, history, curr
 }
 
 
-// --- FIM: NOVAS FUNÇÕES HELPER PARA O BOT ---
-
 async function authenticateFirebaseToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -181,14 +156,12 @@ async function logMessageToTicket(userId, ticketId, messageData) {
     try {
         const messageCollectionRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(ticketId).collection('messages');
         await messageCollectionRef.add(messageData);
-        // Limpa o cache de histórico para forçar a releitura
         delete historyCache[`${userId}-${ticketId}`];
     } catch (error) {
         console.error(`[Firestore] Erro ao salvar mensagem no ticket ${ticketId} para usuário ${userId}:`, error);
     }
 }
 
-// ATUALIZADO: Função createOrUpdateKanbanTicket para lidar com o status 'botPaused'
 async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview) {
   try {
     const userDocRef = db.collection('users').doc(userId);
@@ -203,10 +176,9 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
         messagePreview: messagePreview,
         lastMessageTimestamp: currentTimestamp,
       };
-      // Se o ticket estava 'concluído', ele volta para 'pendente' e reativa o bot.
       if (existingData.status === 'completed') {
         updateData.status = 'pending';
-        updateData.botPaused = false; // Reativa o bot automaticamente
+        updateData.botPaused = false;
       }
       await ticketDocRef.update(updateData);
     } else {
@@ -218,7 +190,7 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
         createdAt: currentTimestamp,
         lastMessageTimestamp: currentTimestamp,
         messagePreview,
-        botPaused: false, // O bot começa ativo por padrão
+        botPaused: false,
       };
       await ticketDocRef.set(newTicket);
     }
@@ -321,21 +293,20 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     emitDashboardDataForUser(userId);
   });
   
-  // --- INÍCIO: LÓGICA PRINCIPAL DE PROCESSAMENTO DE MENSAGENS ---
+  // --- LÓGICA PRINCIPAL DE PROCESSAMENTO DE MENSAGENS ---
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (msg.key.fromMe || !msg.message) return;
 
     const remoteJid = msg.key.remoteJid;
-    if (remoteJid.endsWith('@g.us')) return; // Ignora mensagens de grupo
+    if (remoteJid.endsWith('@g.us')) return;
 
     const messageContent = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-    if (!messageContent) return; // Ignora mensagens sem texto (ex: apenas mídia)
+    if (!messageContent) return;
 
     const contactName = msg.pushName || remoteJid.split('@')[0];
     const phoneNumber = remoteJid.split('@')[0];
     
-    // 1. Loga a mensagem recebida e cria/atualiza o ticket no Kanban
     await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messageContent);
     await logMessageToTicket(userId, phoneNumber, {
         text: messageContent,
@@ -343,14 +314,12 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         timestamp: new Date().toISOString()
     });
 
-    // 2. Busca a configuração do bot para este usuário
     const config = await getBotConfig(userId);
     if (!config || (!config.useGeminiAI && !config.useCustomResponses)) {
       console.log(`[Bot ${userId}] Bot desativado ou sem configuração. Nenhuma resposta enviada.`);
       return;
     }
 
-    // 3. Verifica se o bot está pausado para esta conversa
     const ticketRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(phoneNumber);
     const ticketDoc = await ticketRef.get();
     if (ticketDoc.exists && ticketDoc.data().botPaused) {
@@ -358,7 +327,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         return;
     }
 
-    // 4. Verifica se a mensagem é a palavra-chave para pausar o bot
     const pauseKeyword = config.pauseBotKeyword?.trim().toLowerCase();
     if (pauseKeyword && messageContent.toLowerCase() === pauseKeyword) {
         await ticketRef.update({ botPaused: true });
@@ -371,10 +339,16 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
 
     let responseSent = false;
 
-    // 5. Tenta encontrar uma resposta personalizada (menu)
+    // --- INÍCIO: LÓGICA DE RESPOSTAS PERSONALIZADAS ATUALIZADA ---
     if (config.useCustomResponses && config.customResponses) {
         const responseKey = messageContent.toLowerCase();
-        const responseMessages = config.customResponses[responseKey];
+        let responseMessages = config.customResponses[responseKey];
+
+        // Se não encontrar uma correspondência exata, usa a opção "menu" como padrão
+        if (!responseMessages || responseMessages.length === 0) {
+            responseMessages = config.customResponses['menu'];
+        }
+
         if (responseMessages && responseMessages.length > 0) {
             for (const resMsg of responseMessages) {
                 await sock.sendMessage(remoteJid, { text: resMsg.text });
@@ -384,8 +358,8 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
             responseSent = true;
         }
     }
+    // --- FIM: LÓGICA DE RESPOSTAS PERSONALIZADAS ATUALIZADA ---
 
-    // 6. Se nenhuma resposta personalizada foi enviada, usa a IA
     if (!responseSent && config.useGeminiAI && config.geminiApiKey) {
         const history = await getMessageHistory(userId, phoneNumber);
         const aiResponse = await getGeminiResponse(
@@ -401,10 +375,9 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         }
     }
   });
-  // --- FIM: LÓGICA PRINCIPAL DE PROCESSAMENTO DE MENSAGENS ---
 }
 
-// ... (endpoints app.post não precisam de alteração) ...
+// ... (endpoints e restante do código sem alterações) ...
 app.post('/api/whatsapp/connect', authenticateFirebaseToken, (req, res) => {
     startWhatsAppSession(req.user.uid, null).catch(err => console.error(`Erro ao iniciar sessão para ${req.user.uid}:`, err));
     res.status(200).json({ message: 'Tentando reconectar...' });
@@ -492,7 +465,6 @@ io.on('connection', (socket) => {
               fs.writeFileSync(faqFilePath, faqText);
           }
           
-          // Limpa o cache de configuração para forçar a recarga na próxima mensagem
           delete configCache[userId];
 
           callback({ success: true, message: "Configurações salvas com sucesso!" });
