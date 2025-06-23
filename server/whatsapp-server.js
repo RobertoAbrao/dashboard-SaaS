@@ -177,11 +177,53 @@ async function authenticateFirebaseToken(req, res, next) {
   }
 }
 
+// NOVO: Registra uma atividade para o usuário no dashboard
+async function logActivity(userId, message) {
+  if (!userId || !message) return;
+  try {
+    const logCollectionRef = db.collection('users').doc(userId).collection('activity_log');
+    await logCollectionRef.add({
+      message,
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Mantém apenas os últimos 50 logs para evitar crescimento indefinido
+    const snapshot = await logCollectionRef.orderBy('timestamp', 'desc').get();
+    if (snapshot.size > 50) {
+        const batch = db.batch();
+        snapshot.docs.slice(50).forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+    }
+  } catch (error) {
+    console.error(`[Activity Log] Erro ao salvar log para ${userId}:`, error);
+  }
+}
+
+// NOVO: Atualiza estatísticas diárias para evitar consultas pesadas
+async function updateDailyStats(userId, stat, value = 1) {
+    if (!userId || !stat) return;
+    try {
+        const today = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+        const statRef = db.collection('users').doc(userId).collection('daily_stats').doc(today);
+        await statRef.set({
+            [stat]: admin.firestore.FieldValue.increment(value)
+        }, { merge: true });
+    } catch (error) {
+        console.error(`[Daily Stats] Erro ao atualizar '${stat}' para ${userId}:`, error);
+    }
+}
+
 async function logMessageToTicket(userId, ticketId, messageData) {
     try {
         const messageCollectionRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(ticketId).collection('messages');
         
         await messageCollectionRef.add(messageData);
+
+        // NOVO: Atualiza as estatísticas diárias se a mensagem foi enviada pelo usuário/bot
+        if (messageData.sender === 'user') {
+            await updateDailyStats(userId, 'messagesSent');
+            await emitDashboardDataForUser(userId); // Atualiza o dashboard
+        }
 
         delete historyCache[`${userId}-${ticketId}`];
 
@@ -219,6 +261,8 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
       if (existingData.status === 'completed') {
         updateData.status = 'pending';
         updateData.botPaused = false;
+        await logActivity(userId, `Ticket reaberto para ${contactName || phoneNumber}.`);
+        await emitDashboardDataForUser(userId);
       }
       await ticketDocRef.update(updateData);
     } else {
@@ -233,23 +277,50 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
         botPaused: false,
       };
       await ticketDocRef.set(newTicket);
+      await logActivity(userId, `Novo ticket criado para ${contactName || phoneNumber}.`);
+      await emitDashboardDataForUser(userId);
     }
   } catch (error) {
     console.error(`[Firestore] Erro no ticket para usuário ${userId}:`, error);
   }
 }
 
+// ALTERADO: Função agora é assíncrona e busca dados do Firestore
 async function emitDashboardDataForUser(userId) {
     if (!io.sockets.adapter.rooms.get(userId)) return;
+
     const session = sessions[userId];
     const status = session && session.user ? 'online' : (qrCodes[userId] ? 'qr_ready' : 'offline');
-    const dashboardPayload = {
-        messagesSent: 0,
-        connections: status === 'online' ? 1 : 0,
-        botStatus: status,
-        recentActivity: [{ message: `Status atual: ${status}`, timestamp: new Date().toISOString() }],
-    };
-    io.to(userId).emit('dashboard_update', dashboardPayload);
+
+    try {
+        // Busca estatísticas do dia
+        const today = new Date().toISOString().split('T')[0];
+        const statsDoc = await db.collection('users').doc(userId).collection('daily_stats').doc(today).get();
+        const messagesSentToday = statsDoc.exists ? (statsDoc.data().messagesSent || 0) : 0;
+
+        // Busca atividades recentes
+        const activitySnapshot = await db.collection('users').doc(userId).collection('activity_log').orderBy('timestamp', 'desc').limit(5).get();
+        const recentActivity = activitySnapshot.docs.map(doc => doc.data());
+
+        const dashboardPayload = {
+            messagesSent: messagesSentToday,
+            connections: status === 'online' ? 1 : 0,
+            botStatus: status,
+            recentActivity: recentActivity,
+        };
+        io.to(userId).emit('dashboard_update', dashboardPayload);
+
+    } catch (error) {
+        console.error(`[Dashboard] Erro ao buscar dados para ${userId}:`, error);
+        // Emite um payload padrão em caso de erro
+        const errorPayload = {
+            messagesSent: 0,
+            connections: status === 'online' ? 1 : 0,
+            botStatus: status,
+            recentActivity: [{ message: `Erro ao carregar dados do dashboard.`, timestamp: new Date().toISOString() }],
+        };
+        io.to(userId).emit('dashboard_update', errorPayload);
+    }
 }
 
 const getFileExtension = (mediaType) => {
@@ -316,6 +387,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason[statusCode] || 'Desconhecida';
       console.error(`[Sessão ${userId}] Conexão fechada. Razão: ${reason}`);
+      await logActivity(userId, `Conexão perdida. Razão: ${reason}`);
       
       delete sessions[userId];
       delete qrCodes[userId];
@@ -328,6 +400,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
            io.to(userId).emit('disconnected', `Conexão perdida. Reconectando...`);
       } else {
           console.log(`[Sessão ${userId}] Usuário deslogado. Limpando sessão.`);
+          await logActivity(userId, `Sessão encerrada (logout).`);
           if (fs.existsSync(sessionFolderPath)) {
               fs.rmSync(sessionFolderPath, { recursive: true, force: true });
           }
@@ -336,11 +409,12 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
 
     } else if (connection === 'open') {
       console.log(`[Sessão ${userId}] Conexão aberta.`);
+      await logActivity(userId, 'Bot conectado com sucesso.');
       delete qrCodes[userId];
       io.to(userId).emit('ready');
     }
     
-    emitDashboardDataForUser(userId);
+    await emitDashboardDataForUser(userId);
   });
   
   sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -352,6 +426,9 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
 
     const phoneNumber = remoteJid.split('@')[0];
     const contactName = msg.pushName || phoneNumber;
+
+    await logActivity(userId, `Mensagem recebida de ${contactName}.`);
+    await emitDashboardDataForUser(userId);
 
     let messageContent = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
     let messageType = 'text';
@@ -421,6 +498,8 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         await sock.sendMessage(remoteJid, { text: transferMessage });
         await logMessageToTicket(userId, phoneNumber, { text: transferMessage, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
         console.log(`[Bot ${userId}] Pausado para ${phoneNumber} pela palavra-chave.`);
+        await logActivity(userId, `Bot pausado para atendimento humano com ${contactName}.`);
+        await emitDashboardDataForUser(userId);
         return;
     }
 
@@ -515,7 +594,7 @@ io.on('connection', (socket) => {
       socket.join(userId);
       console.log(`[Socket Auth] Cliente ${socket.id} autenticado para usuário ${userId}`);
       socket.emit('auth_success');
-      emitDashboardDataForUser(userId);
+      await emitDashboardDataForUser(userId);
     } catch (error) {
       console.error("[Socket Auth] Falha na autenticação:", error.message);
       socket.emit('auth_failed', 'Token inválido.');
@@ -564,6 +643,9 @@ io.on('connection', (socket) => {
           }
           
           delete configCache[userId];
+          
+          await logActivity(userId, 'Configurações do bot foram salvas.');
+          await emitDashboardDataForUser(userId);
 
           callback({ success: true, message: "Configurações salvas com sucesso!" });
       } catch (error) {
@@ -603,6 +685,8 @@ io.on('connection', (socket) => {
 
             await sock.sendMessage(jid, messagePayload);
             await logMessageToTicket(userId, to.replace(/\D/g, ''), logPayload);
+            await logActivity(userId, `Mensagem manual enviada para ${to.replace(/\D/g, '')}.`);
+            await emitDashboardDataForUser(userId);
 
             callback({ success: true, message: 'Mensagem enviada com sucesso!' });
         } catch (error) {
