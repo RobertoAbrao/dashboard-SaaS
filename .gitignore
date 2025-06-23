@@ -12,6 +12,7 @@ node_modules
 /server/firebase-service-account-key.json
 /server/sessions
 /server/user_data
+/server/public
 dist
 dist-ssr
 .env
