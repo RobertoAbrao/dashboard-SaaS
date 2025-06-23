@@ -40,7 +40,7 @@ Uma aplicação full-stack que fornece um dashboard para gerenciar e automatizar
   - **Framework:** Express.js
   - **WhatsApp API (Não-Oficial):** Baileys (`@whiskeysockets/baileys`)
   - **Comunicação Real-time:** Socket.IO
-  - **Banco de Dados (ORM):** Prisma
+  - **Banco de Dados (ORM):** Firebase
   - **Autenticação e Firestore:** Firebase Admin
   - **Tokens de Autenticação:** JSON Web Token (JWT)
   - **Segurança:** bcryptjs para hash de senhas
