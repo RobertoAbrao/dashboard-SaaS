@@ -11,7 +11,16 @@ export interface MediaInfo {
 
 export type WhatsAppConnectionStatus = 'offline' | 'connecting_socket' | 'socket_authenticated' | 'initializing' | 'qr_ready' | 'online' | 'auth_failed' | 'disconnected_whatsapp' | 'pairing';
 export interface ActivityLogEntry { message: string; timestamp: string; }
-export interface DashboardData { messagesSent: number; connections: number; botStatus: WhatsAppConnectionStatus; recentActivity: ActivityLogEntry[]; }
+
+// ALTERADO: Adicionado messagesPending e messagesFailed
+export interface DashboardData { 
+    messagesSent: number; 
+    messagesPending: number;
+    messagesFailed: number;
+    connections: number; 
+    botStatus: WhatsAppConnectionStatus; 
+    recentActivity: ActivityLogEntry[]; 
+}
 
 interface WhatsAppState {
   status: WhatsAppConnectionStatus;
@@ -23,8 +32,11 @@ interface WhatsAppState {
 
 const SOCKET_SERVER_URL = 'http://localhost:3001';
 
+// ALTERADO: Adicionado os novos campos ao estado inicial
 const initialDashboardData: DashboardData = {
     messagesSent: 0,
+    messagesPending: 0,
+    messagesFailed: 0,
     connections: 0,
     botStatus: 'offline',
     recentActivity: [],

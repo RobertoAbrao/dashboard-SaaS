@@ -177,7 +177,6 @@ async function authenticateFirebaseToken(req, res, next) {
   }
 }
 
-// NOVO: Registra uma atividade para o usuário no dashboard
 async function logActivity(userId, message) {
   if (!userId || !message) return;
   try {
@@ -187,7 +186,6 @@ async function logActivity(userId, message) {
       timestamp: new Date().toISOString(),
     });
     
-    // Mantém apenas os últimos 50 logs para evitar crescimento indefinido
     const snapshot = await logCollectionRef.orderBy('timestamp', 'desc').get();
     if (snapshot.size > 50) {
         const batch = db.batch();
@@ -199,7 +197,7 @@ async function logActivity(userId, message) {
   }
 }
 
-// NOVO: Atualiza estatísticas diárias para evitar consultas pesadas
+// ALTERADO: A função agora aceita valores negativos para decremento
 async function updateDailyStats(userId, stat, value = 1) {
     if (!userId || !stat) return;
     try {
@@ -219,12 +217,8 @@ async function logMessageToTicket(userId, ticketId, messageData) {
         
         await messageCollectionRef.add(messageData);
 
-        // NOVO: Atualiza as estatísticas diárias se a mensagem foi enviada pelo usuário/bot
-        if (messageData.sender === 'user') {
-            await updateDailyStats(userId, 'messagesSent');
-            await emitDashboardDataForUser(userId); // Atualiza o dashboard
-        }
-
+        // REMOVIDO: A lógica de contagem foi movida para o handler 'send-message'
+        
         delete historyCache[`${userId}-${ticketId}`];
 
         const snapshot = await messageCollectionRef.orderBy("timestamp", "desc").get();
@@ -285,7 +279,7 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
   }
 }
 
-// ALTERADO: Função agora é assíncrona e busca dados do Firestore
+// ALTERADO: Busca e envia os novos status de mensagem
 async function emitDashboardDataForUser(userId) {
     if (!io.sockets.adapter.rooms.get(userId)) return;
 
@@ -293,17 +287,17 @@ async function emitDashboardDataForUser(userId) {
     const status = session && session.user ? 'online' : (qrCodes[userId] ? 'qr_ready' : 'offline');
 
     try {
-        // Busca estatísticas do dia
         const today = new Date().toISOString().split('T')[0];
         const statsDoc = await db.collection('users').doc(userId).collection('daily_stats').doc(today).get();
-        const messagesSentToday = statsDoc.exists ? (statsDoc.data().messagesSent || 0) : 0;
-
-        // Busca atividades recentes
+        const dailyData = statsDoc.exists ? statsDoc.data() : {};
+        
         const activitySnapshot = await db.collection('users').doc(userId).collection('activity_log').orderBy('timestamp', 'desc').limit(5).get();
         const recentActivity = activitySnapshot.docs.map(doc => doc.data());
 
         const dashboardPayload = {
-            messagesSent: messagesSentToday,
+            messagesSent: dailyData.messagesSent || 0,
+            messagesPending: dailyData.messagesPending || 0, // NOVO
+            messagesFailed: dailyData.messagesFailed || 0,   // NOVO
             connections: status === 'online' ? 1 : 0,
             botStatus: status,
             recentActivity: recentActivity,
@@ -312,9 +306,10 @@ async function emitDashboardDataForUser(userId) {
 
     } catch (error) {
         console.error(`[Dashboard] Erro ao buscar dados para ${userId}:`, error);
-        // Emite um payload padrão em caso de erro
         const errorPayload = {
             messagesSent: 0,
+            messagesPending: 0,
+            messagesFailed: 0,
             connections: status === 'online' ? 1 : 0,
             botStatus: status,
             recentActivity: [{ message: `Erro ao carregar dados do dashboard.`, timestamp: new Date().toISOString() }],
@@ -322,6 +317,7 @@ async function emitDashboardDataForUser(userId) {
         io.to(userId).emit('dashboard_update', errorPayload);
     }
 }
+
 
 const getFileExtension = (mediaType) => {
     if (mediaType === 'image') return 'jpg';
@@ -654,49 +650,59 @@ io.on('connection', (socket) => {
       }
   });
   
+  // ALTERADO: Lógica de envio e contagem de status
   socket.on('send-message', async ({ to, text, media }, callback) => {
     if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
     const sock = sessions[userId];
-    if (sock && sock.user) {
-        try {
-            const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
-            
-            let messagePayload;
-            let logPayload;
+    if (!sock || !sock.user) {
+        return callback({ success: false, message: 'WhatsApp não está conectado.' });
+    }
 
-            if (media?.serverFilePath) {
-                const mediaPath = path.join(MEDIA_DIR, media.serverFilePath);
-                
-                if (media.mimetype.startsWith('image/')) {
-                    messagePayload = { image: { url: mediaPath }, caption: text };
-                    logPayload = { type: 'image', url: `/media/${media.serverFilePath}`, text: text, sender: 'user', timestamp: new Date().toISOString() };
-                } else if (media.mimetype.startsWith('audio/')) {
-                    messagePayload = { audio: { url: mediaPath }, mimetype: 'audio/ogg; codecs=opus', ptt: true };
-                     logPayload = { type: 'audio', url: `/media/${media.serverFilePath}`, text: '', sender: 'user', timestamp: new Date().toISOString() };
-                } else {
-                    messagePayload = { document: { url: mediaPath }, fileName: media.originalName, mimetype: media.mimetype };
-                    logPayload = { type: 'document', url: `/media/${media.serverFilePath}`, text: media.originalName, sender: 'user', timestamp: new Date().toISOString() };
-                }
+    try {
+        await updateDailyStats(userId, 'messagesPending', 1);
+        await emitDashboardDataForUser(userId); // Atualiza o front com o status 'pendente'
 
+        const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
+        
+        let messagePayload;
+        let logPayload;
+
+        if (media?.serverFilePath) {
+            const mediaPath = path.join(MEDIA_DIR, media.serverFilePath);
+            if (media.mimetype.startsWith('image/')) {
+                messagePayload = { image: { url: mediaPath }, caption: text };
+                logPayload = { type: 'image', url: `/media/${media.serverFilePath}`, text: text, sender: 'user', timestamp: new Date().toISOString() };
+            } else if (media.mimetype.startsWith('audio/')) {
+                messagePayload = { audio: { url: mediaPath }, mimetype: 'audio/ogg; codecs=opus', ptt: true };
+                logPayload = { type: 'audio', url: `/media/${media.serverFilePath}`, text: '', sender: 'user', timestamp: new Date().toISOString() };
             } else {
-                messagePayload = { text };
-                logPayload = { text, sender: 'user', timestamp: new Date().toISOString(), type: 'text' };
+                messagePayload = { document: { url: mediaPath }, fileName: media.originalName, mimetype: media.mimetype };
+                logPayload = { type: 'document', url: `/media/${media.serverFilePath}`, text: media.originalName, sender: 'user', timestamp: new Date().toISOString() };
             }
-
-            await sock.sendMessage(jid, messagePayload);
-            await logMessageToTicket(userId, to.replace(/\D/g, ''), logPayload);
-            await logActivity(userId, `Mensagem manual enviada para ${to.replace(/\D/g, '')}.`);
-            await emitDashboardDataForUser(userId);
-
-            callback({ success: true, message: 'Mensagem enviada com sucesso!' });
-        } catch (error) {
-            console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
-            callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
+        } else {
+            messagePayload = { text };
+            logPayload = { text, sender: 'user', timestamp: new Date().toISOString(), type: 'text' };
         }
-    } else {
-        callback({ success: false, message: 'WhatsApp não está conectado.' });
+
+        await sock.sendMessage(jid, messagePayload);
+        
+        await updateDailyStats(userId, 'messagesSent', 1);
+        await logMessageToTicket(userId, to.replace(/\D/g, ''), logPayload);
+        await logActivity(userId, `Mensagem manual enviada para ${to.replace(/\D/g, '')}.`);
+        
+        callback({ success: true, message: 'Mensagem enviada com sucesso!' });
+
+    } catch (error) {
+        console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
+        await updateDailyStats(userId, 'messagesFailed', 1); // Incrementa falhas
+        callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
+
+    } finally {
+        await updateDailyStats(userId, 'messagesPending', -1); // Decrementa pendentes
+        await emitDashboardDataForUser(userId); // Atualiza o front com o status final
     }
   });
+
 
   socket.on('disconnect', () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);

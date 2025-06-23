@@ -6,6 +6,8 @@ import type { ActivityLogEntry, WhatsAppConnectionStatus } from '@/hooks/useWhat
 
 interface DashboardProps {
   messagesSent: number;
+  messagesPending: number; // NOVO
+  messagesFailed: number;  // NOVO
   connections: number;
   botStatus: WhatsAppConnectionStatus;
   recentActivityData: ActivityLogEntry[];
@@ -24,14 +26,17 @@ const dailyDataPlaceholder = [
   { day: 'Dom', messages: 0 },
 ];
 
-const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }: DashboardProps) => {
+// ALTERADO: O componente agora recebe e usa os novos dados
+const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData, messagesPending, messagesFailed }: DashboardProps) => {
   
-  const totalMessagesForPie = messagesSent > 0 ? messagesSent : 1; // Avoid division by zero if messagesSent is 0
+  // ALTERADO: O total do gráfico agora considera todos os status
+  const totalMessagesForPie = messagesSent + messagesPending + messagesFailed || 1;
 
+  // ALTERADO: Os dados do gráfico agora usam as props com dados reais
   const statusPieData = [
     { name: 'Enviadas', value: messagesSent, color: '#10B981' },
-    { name: 'Pendentes (Exemplo)', value: Math.max(0, Math.floor(messagesSent * 0.05)), color: '#F59E0B' },
-    { name: 'Falhas (Exemplo)', value: Math.max(0, Math.floor(messagesSent * 0.02)), color: '#EF4444' },
+    { name: 'Pendentes', value: messagesPending, color: '#F59E0B' },
+    { name: 'Falhas', value: messagesFailed, color: '#EF4444' },
   ];
 
   const formattedRecentActivity = recentActivityData.map(log => {
@@ -100,9 +105,9 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }:
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Status das Mensagens (Exemplo)</CardTitle>
+            <CardTitle>Status das Mensagens</CardTitle>
             <CardDescription>
-              Distribuição do status das mensagens enviadas (baseado no total enviado)
+              Distribuição do status das mensagens enviadas hoje.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -117,7 +122,7 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }:
                   paddingAngle={5} 
                   dataKey="value" 
                   labelLine={false} 
-                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}  // CORRIGIDO AQUI
+                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                 >
                   {statusPieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />

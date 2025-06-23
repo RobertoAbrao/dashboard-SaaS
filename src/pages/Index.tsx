@@ -413,6 +413,8 @@ const Index = () => {
           <TabsContent value="dashboard">
             <Dashboard
               messagesSent={dashboardData.messagesSent}
+              messagesPending={dashboardData.messagesPending}
+              messagesFailed={dashboardData.messagesFailed}
               connections={dashboardData.connections}
               botStatus={dashboardData.botStatus}
               recentActivityData={dashboardData.recentActivity}
