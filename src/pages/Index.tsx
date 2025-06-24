@@ -3,7 +3,8 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut, AlertTriangle, CircleUser } from 'lucide-react';
+// ALTERADO: Adicionado o ícone 'Wifi' e removido 'BarChart3' que não será mais usado aqui
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, Wifi, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut, AlertTriangle, CircleUser, BarChart3 } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -304,6 +305,7 @@ const Index = () => {
     }
   };
 
+  // ALTERADO: A constante 'stats' agora usa os dados reais do dashboardData
   const stats = [
     {
       title: "Status do Bot",
@@ -313,25 +315,25 @@ const Index = () => {
       bgColor: getStatusColors(botDisplayStatus).bgColor,
     },
     {
-      title: "Mensagens Enviadas Hoje",
+      title: "Mensagens Hoje",
       value: dashboardData.messagesSent.toString(),
       icon: MessageCircle,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50'
     },
     {
-      title: "Conexões Ativas",
-      value: dashboardData.connections.toString(),
-      icon: Users,
+      title: "Taxa de Entrega",
+      value: `${dashboardData.deliveryRate.toFixed(1)}%`,
+      icon: Users, // Pode trocar por um ícone melhor, como CheckCircle
       color: 'text-purple-600',
       bgColor: 'bg-purple-50'
     },
     {
-      title: "Uptime (Placeholder)",
-      value: "99.9%",
-      icon: BarChart3,
-      color: 'text-indigo-600',
-      bgColor: 'bg-indigo-50'
+      title: "Uptime Hoje",
+      value: `${dashboardData.uptimePercentage.toFixed(1)}%`,
+      icon: Wifi, // Usando o novo ícone
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50'
     }
   ];
 
@@ -436,7 +438,6 @@ const Index = () => {
             </TabsTrigger>
           </TabsList>
 
-          {/* ALTERADO: Passando as novas props para o componente Dashboard */}
           <TabsContent value="dashboard">
             <Dashboard
               messagesSent={dashboardData.messagesSent}
