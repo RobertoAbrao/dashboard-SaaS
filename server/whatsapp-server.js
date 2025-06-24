@@ -309,6 +309,8 @@ async function calculateResponseTime(userId, phoneNumber) {
 
 
 // ALTERADO: Função que emite os dados do dashboard agora calcula e envia as novas métricas
+// SUBSTITUA A FUNÇÃO ANTIGA POR ESTA VERSÃO MELHORADA
+
 async function emitDashboardDataForUser(userId) {
     if (!io.sockets.adapter.rooms.get(userId)) return;
 
@@ -323,7 +325,7 @@ async function emitDashboardDataForUser(userId) {
         const activitySnapshot = await db.collection('users').doc(userId).collection('activity_log').orderBy('timestamp', 'desc').limit(5).get();
         const recentActivity = activitySnapshot.docs.map(doc => doc.data());
 
-        // --- INÍCIO DOS CÁLCULOS DAS NOVAS MÉTRICAS ---
+        // --- INÍCIO DOS CÁLCULOS DAS MÉTRICAS ---
 
         // Taxa de Entrega
         const messagesSent = dailyData.messagesSent || 0;
@@ -337,8 +339,17 @@ async function emitDashboardDataForUser(userId) {
         const responseCount = dailyData.responseCount || 0;
         const avgResponseTime = responseCount > 0 ? (totalResponseTime / responseCount / 1000) : 0; // em segundos
 
-        // Uptime
-        const totalUptime = dailyData.totalUptime || 0; // em segundos
+        // Uptime (LÓGICA MELHORADA)
+        const savedUptime = dailyData.totalUptime || 0; // Uptime salvo de sessões anteriores
+        let currentSessionUptime = 0;
+        
+        // Se a sessão está ativa, calcula o tempo de uptime atual em tempo real
+        if (connectionTimestamps[userId]) {
+            currentSessionUptime = (Date.now() - connectionTimestamps[userId]) / 1000; // em segundos
+        }
+        
+        const totalUptime = savedUptime + currentSessionUptime; // Soma o uptime salvo com o da sessão atual
+
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const secondsSinceStartOfDay = (now.getTime() - startOfDay.getTime()) / 1000;
@@ -355,7 +366,6 @@ async function emitDashboardDataForUser(userId) {
             connections: status === 'online' ? 1 : 0,
             botStatus: status,
             recentActivity: recentActivity,
-            // NOVAS MÉTRICAS ENVIADAS PARA O FRONTEND
             deliveryRate: deliveryRate,
             avgResponseTime: avgResponseTime,
             uptimePercentage: uptimePercentage,
@@ -364,7 +374,6 @@ async function emitDashboardDataForUser(userId) {
 
     } catch (error) {
         console.error(`[Dashboard] Erro ao buscar dados para ${userId}:`, error);
-        // Payload de erro com valores padrão
         const errorPayload = {
             messagesSent: 0, messagesPending: 0, messagesFailed: 0,
             connections: status === 'online' ? 1 : 0, botStatus: status,
