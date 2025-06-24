@@ -1,19 +1,23 @@
 // src/components/Dashboard.tsx
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, Clock, AlertTriangle, Activity as ActivityIcon } from 'lucide-react';
+import { TrendingUp, Clock, AlertTriangle, Activity as ActivityIcon, CheckCircle, Wifi, Zap } from 'lucide-react';
 import type { ActivityLogEntry, WhatsAppConnectionStatus } from '@/hooks/useWhatsAppConnection';
 
+// ALTERADO: Interface de props atualizada com as novas métricas
 interface DashboardProps {
   messagesSent: number;
-  messagesPending: number; // NOVO
-  messagesFailed: number;  // NOVO
+  messagesPending: number;
+  messagesFailed: number;
   connections: number;
   botStatus: WhatsAppConnectionStatus;
   recentActivityData: ActivityLogEntry[];
+  deliveryRate: number;
+  avgResponseTime: number; // em segundos
+  uptimePercentage: number;
 }
 
-// Dados fictícios para os gráficos que ainda não vêm do Redis
+// Dados fictícios para os gráficos que ainda não são dinâmicos
 const messageDataPlaceholder = [
   { time: '00:00', messages: 0 }, { time: '04:00', messages: 0 },
   { time: '08:00', messages: 0 }, { time: '12:00', messages: 0 },
@@ -26,13 +30,18 @@ const dailyDataPlaceholder = [
   { day: 'Dom', messages: 0 },
 ];
 
-// ALTERADO: O componente agora recebe e usa os novos dados
-const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData, messagesPending, messagesFailed }: DashboardProps) => {
+const Dashboard = ({ 
+  messagesSent, 
+  messagesPending, 
+  messagesFailed, 
+  recentActivityData,
+  deliveryRate,
+  avgResponseTime,
+  uptimePercentage
+ }: DashboardProps) => {
   
-  // ALTERADO: O total do gráfico agora considera todos os status
   const totalMessagesForPie = messagesSent + messagesPending + messagesFailed || 1;
 
-  // ALTERADO: Os dados do gráfico agora usam as props com dados reais
   const statusPieData = [
     { name: 'Enviadas', value: messagesSent, color: '#10B981' },
     { name: 'Pendentes', value: messagesPending, color: '#F59E0B' },
@@ -56,7 +65,6 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData, m
 
   return (
     <div className="space-y-6">
-      {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -180,31 +188,41 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData, m
         </Card>
       </div>
 
+      {/* ALTERADO: Card de Métricas de Performance agora usa dados reais */}
       <Card>
         <CardHeader>
           <CardTitle>Métricas de Performance</CardTitle>
           <CardDescription>
-            Indicadores de desempenho do seu bot WhatsApp
+            Indicadores de desempenho do seu bot WhatsApp no dia de hoje
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-green-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-green-600">98.5%</div>
-              <div className="text-sm text-green-800">Taxa de Entrega (Exemplo)</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            
+            <div className="bg-green-50 p-4 rounded-lg flex flex-col items-center justify-center">
+              <CheckCircle className="h-6 w-6 text-green-600 mb-2"/>
+              <div className="text-2xl font-bold text-green-800">{deliveryRate.toFixed(1)}%</div>
+              <div className="text-sm font-medium text-green-700">Taxa de Entrega</div>
             </div>
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">1.2s</div>
-              <div className="text-sm text-blue-800">Tempo Médio Resposta (Exemplo)</div>
+
+            <div className="bg-blue-50 p-4 rounded-lg flex flex-col items-center justify-center">
+               <Clock className="h-6 w-6 text-blue-600 mb-2"/>
+              <div className="text-2xl font-bold text-blue-800">{avgResponseTime.toFixed(1)}s</div>
+              <div className="text-sm font-medium text-blue-700">Tempo de Resposta</div>
             </div>
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-purple-600">{messagesSent}</div>
-              <div className="text-sm text-purple-800">Mensagens Hoje</div>
+
+            <div className="bg-purple-50 p-4 rounded-lg flex flex-col items-center justify-center">
+               <Zap className="h-6 w-6 text-purple-600 mb-2"/>
+              <div className="text-2xl font-bold text-purple-800">{messagesSent}</div>
+              <div className="text-sm font-medium text-purple-700">Mensagens Hoje</div>
             </div>
-            <div className="bg-orange-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-orange-600">99.2%</div>
-              <div className="text-sm text-orange-800">Uptime (Exemplo)</div>
+
+            <div className="bg-orange-50 p-4 rounded-lg flex flex-col items-center justify-center">
+              <Wifi className="h-6 w-6 text-orange-600 mb-2"/>
+              <div className="text-2xl font-bold text-orange-800">{uptimePercentage.toFixed(1)}%</div>
+              <div className="text-sm font-medium text-orange-700">Uptime</div>
             </div>
+
           </div>
         </CardContent>
       </Card>

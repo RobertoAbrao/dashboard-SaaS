@@ -3,7 +3,7 @@ import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut, AlertTriangle, CircleUser } from 'lucide-react'; // NOVO: Adicionado CircleUser
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut, AlertTriangle, CircleUser } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -15,8 +15,8 @@ import { useToast } from "@/components/ui/use-toast";
 import KanbanBoard from '@/components/KanbanBoard';
 import { Switch } from '@/components/ui/switch';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth'; // NOVO: Importando o hook de autenticação
-import { // NOVO: Importando componentes do menu dropdown
+import { useAuth } from '@/hooks/useAuth';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -47,7 +47,7 @@ const Index = () => {
   const { status: currentStatus, dashboardData, socketRef } = useWhatsAppConnection();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user, logout } = useAuth(); // NOVO: Usando o hook para obter o usuário e a função de logout
+  const { user, logout } = useAuth();
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -65,10 +65,8 @@ const Index = () => {
 
     if (currentSocket && currentSocket.connected) {
       const fetchConfig = () => {
-        console.log("Solicitando configurações do bot do servidor...");
         currentSocket.emit('get_bot_config', (response: { success: boolean, data?: Partial<BotConfig> & { faqFilename?: string }, message?: string }) => {
           if (response.success && response.data) {
-            console.log("Configurações recebidas:", response.data);
             setGeminiApiKey(response.data.geminiApiKey || '');
             setSystemPrompt(response.data.systemPrompt || 'Você é um assistente prestativo.');
             if (response.data.faqFilename) {
@@ -124,9 +122,6 @@ const Index = () => {
       toast({ title: "Erro de Conexão", description: "Não foi possível conectar ao servidor para salvar.", variant: "destructive" });
       return;
     }
-    
-    // REMOVIDO: Bloco que obrigava um bot a estar ativo
-    // if (!useGeminiAI && !useCustomResponses) { ... }
 
     if (useGeminiAI && !geminiApiKey) {
       toast({ title: "API Key Faltando", description: "Por favor, insira a API Key do Gemini.", variant: "destructive" });
@@ -154,7 +149,6 @@ const Index = () => {
       }
     }
 
-
     setIsSavingConfig(true);
     let faqTextContent = '';
     if (faqFile) {
@@ -178,8 +172,6 @@ const Index = () => {
       customResponses,
       pauseBotKeyword,
     };
-
-    console.log("Enviando para salvar config:", configToSave);
 
     socketRef.current.emit('save_bot_config', configToSave, (response: { success: boolean, message: string }) => {
       setIsSavingConfig(false);
@@ -284,7 +276,6 @@ const Index = () => {
     }));
   }, []);
 
-
   const botDisplayStatus: WhatsAppConnectionStatus = dashboardData.botStatus || currentStatus;
 
   const getStatusValue = (statusValue: WhatsAppConnectionStatus) => {
@@ -344,10 +335,9 @@ const Index = () => {
     }
   ];
 
-  // ALTERADO: A função de logout agora usa o hook de autenticação
   const handleLogout = async () => {
     try {
-      await logout(); // Usa a função de logout do contexto, que é mais segura
+      await logout();
       navigate('/login');
       toast({
         title: "Logout realizado",
@@ -377,7 +367,6 @@ const Index = () => {
                 <p className="text-sm text-gray-500">Automação profissional para WhatsApp</p>
               </div>
             </div>
-            {/* ALTERADO: O botão de logout foi substituído por um menu de usuário */}
             <div className="flex items-center space-x-4">
               <BotStatus />
               <DropdownMenu>
@@ -447,6 +436,7 @@ const Index = () => {
             </TabsTrigger>
           </TabsList>
 
+          {/* ALTERADO: Passando as novas props para o componente Dashboard */}
           <TabsContent value="dashboard">
             <Dashboard
               messagesSent={dashboardData.messagesSent}
@@ -455,6 +445,9 @@ const Index = () => {
               connections={dashboardData.connections}
               botStatus={dashboardData.botStatus}
               recentActivityData={dashboardData.recentActivity}
+              deliveryRate={dashboardData.deliveryRate}
+              avgResponseTime={dashboardData.avgResponseTime}
+              uptimePercentage={dashboardData.uptimePercentage}
             />
           </TabsContent>
           <TabsContent value="qrcode"> <QRCodeSection /> </TabsContent>
@@ -482,7 +475,6 @@ const Index = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* ADICIONADO: Aviso de modo manual */}
                 {!useGeminiAI && !useCustomResponses && (
                     <div className="p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 border border-yellow-200 flex items-center gap-3">
                         <AlertTriangle className="h-5 w-5"/>
@@ -492,7 +484,6 @@ const Index = () => {
                     </div>
                 )}
 
-                {/* Seção de Ativação/Desativação da IA */}
                 <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center space-x-3">
                         <Brain className="h-5 w-5 text-purple-600" />
@@ -567,7 +558,6 @@ const Index = () => {
                     </>
                 )}
 
-                {/* Seção de Respostas Personalizadas */}
                 <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center space-x-3">
                         <ListTodo className="h-5 w-5 text-blue-600" />
@@ -694,7 +684,6 @@ const Index = () => {
                         ))}
                     </div>
                 )}
-
 
                 <div className="flex justify-end pt-4">
                   <Button

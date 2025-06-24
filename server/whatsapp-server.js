@@ -45,6 +45,7 @@ const sessions = {};
 const qrCodes = {};
 const configCache = {};
 const historyCache = {};
+const connectionTimestamps = {}; // NOVO: Para rastrear o tempo de conexão (Uptime)
 
 
 const SESSIONS_DIR = path.join(__dirname, 'sessions');
@@ -235,20 +236,27 @@ async function logMessageToTicket(userId, ticketId, messageData) {
     }
 }
 
-async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview) {
+// ALTERADO: Adicionado parâmetro 'isContactMessage' para lógica de tempo de resposta
+async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview, isContactMessage = false) {
   try {
     const userDocRef = db.collection('users').doc(userId);
     const ticketDocRef = userDocRef.collection('kanban_tickets').doc(phoneNumber);
     
     const ticketDoc = await ticketDocRef.get();
     const currentTimestamp = new Date().toISOString();
+    
+    const updateData = {
+        messagePreview: messagePreview,
+        lastMessageTimestamp: currentTimestamp,
+    };
+
+    // NOVO: Se a mensagem for do contato, registra o timestamp para calcular o tempo de resposta depois
+    if (isContactMessage) {
+        updateData.lastContactMessageTimestamp = currentTimestamp;
+    }
 
     if (ticketDoc.exists) {
       const existingData = ticketDoc.data();
-      const updateData = {
-        messagePreview: messagePreview,
-        lastMessageTimestamp: currentTimestamp,
-      };
       if (existingData.status === 'completed') {
         updateData.status = 'pending';
         updateData.botPaused = false;
@@ -266,6 +274,7 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
         lastMessageTimestamp: currentTimestamp,
         messagePreview,
         botPaused: false,
+        ...(isContactMessage && { lastContactMessageTimestamp: currentTimestamp }) // Adiciona o timestamp se for do contato
       };
       await ticketDocRef.set(newTicket);
       await logActivity(userId, `Novo ticket criado para ${contactName || phoneNumber}.`);
@@ -276,6 +285,30 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
   }
 }
 
+// NOVO: Função para calcular o tempo de resposta
+async function calculateResponseTime(userId, phoneNumber) {
+    try {
+        const ticketRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(phoneNumber);
+        const ticketDoc = await ticketRef.get();
+
+        if (ticketDoc.exists && ticketDoc.data().lastContactMessageTimestamp) {
+            const lastContactTime = new Date(ticketDoc.data().lastContactMessageTimestamp);
+            const responseTime = Date.now() - lastContactTime.getTime(); // em ms
+
+            // Atualiza as estatísticas no Firestore
+            await updateDailyStats(userId, 'totalResponseTime', responseTime);
+            await updateDailyStats(userId, 'responseCount', 1);
+
+            // Limpa o timestamp para não contar novamente para a mesma mensagem do contato
+            await ticketRef.update({ lastContactMessageTimestamp: admin.firestore.FieldValue.delete() });
+        }
+    } catch (error) {
+        console.error(`[Response Time] Erro ao calcular tempo de resposta para ${phoneNumber}:`, error);
+    }
+}
+
+
+// ALTERADO: Função que emite os dados do dashboard agora calcula e envia as novas métricas
 async function emitDashboardDataForUser(userId) {
     if (!io.sockets.adapter.rooms.get(userId)) return;
 
@@ -290,25 +323,53 @@ async function emitDashboardDataForUser(userId) {
         const activitySnapshot = await db.collection('users').doc(userId).collection('activity_log').orderBy('timestamp', 'desc').limit(5).get();
         const recentActivity = activitySnapshot.docs.map(doc => doc.data());
 
+        // --- INÍCIO DOS CÁLCULOS DAS NOVAS MÉTRICAS ---
+
+        // Taxa de Entrega
+        const messagesSent = dailyData.messagesSent || 0;
+        const messagesFailed = dailyData.messagesFailed || 0;
+        const deliveryRate = (messagesSent + messagesFailed) > 0 
+            ? (messagesSent / (messagesSent + messagesFailed)) * 100 
+            : 100;
+
+        // Tempo Médio de Resposta
+        const totalResponseTime = dailyData.totalResponseTime || 0;
+        const responseCount = dailyData.responseCount || 0;
+        const avgResponseTime = responseCount > 0 ? (totalResponseTime / responseCount / 1000) : 0; // em segundos
+
+        // Uptime
+        const totalUptime = dailyData.totalUptime || 0; // em segundos
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const secondsSinceStartOfDay = (now.getTime() - startOfDay.getTime()) / 1000;
+        const uptimePercentage = secondsSinceStartOfDay > 0 
+            ? Math.min((totalUptime / secondsSinceStartOfDay) * 100, 100)
+            : 100;
+
+        // --- FIM DOS CÁLCULOS ---
+
         const dashboardPayload = {
-            messagesSent: dailyData.messagesSent || 0,
+            messagesSent: messagesSent,
             messagesPending: dailyData.messagesPending || 0,
-            messagesFailed: dailyData.messagesFailed || 0,
+            messagesFailed: messagesFailed,
             connections: status === 'online' ? 1 : 0,
             botStatus: status,
             recentActivity: recentActivity,
+            // NOVAS MÉTRICAS ENVIADAS PARA O FRONTEND
+            deliveryRate: deliveryRate,
+            avgResponseTime: avgResponseTime,
+            uptimePercentage: uptimePercentage,
         };
         io.to(userId).emit('dashboard_update', dashboardPayload);
 
     } catch (error) {
         console.error(`[Dashboard] Erro ao buscar dados para ${userId}:`, error);
+        // Payload de erro com valores padrão
         const errorPayload = {
-            messagesSent: 0,
-            messagesPending: 0,
-            messagesFailed: 0,
-            connections: status === 'online' ? 1 : 0,
-            botStatus: status,
+            messagesSent: 0, messagesPending: 0, messagesFailed: 0,
+            connections: status === 'online' ? 1 : 0, botStatus: status,
             recentActivity: [{ message: `Erro ao carregar dados do dashboard.`, timestamp: new Date().toISOString() }],
+            deliveryRate: 0, avgResponseTime: 0, uptimePercentage: 0,
         };
         io.to(userId).emit('dashboard_update', errorPayload);
     }
@@ -357,6 +418,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   sessions[userId] = sock;
   sock.ev.on('creds.update', saveCreds);
 
+  // ALTERADO: Lógica de conexão para registrar Uptime
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     console.log(`[Sessão ${userId}] Status da Conexão: ${connection || 'N/A'}`);
@@ -376,6 +438,14 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     }
     
     if (connection === 'close') {
+      // NOVO: Calcula a duração da sessão online ao desconectar
+      if (connectionTimestamps[userId]) {
+          const sessionDuration = (Date.now() - connectionTimestamps[userId]) / 1000; // em segundos
+          await updateDailyStats(userId, 'totalUptime', sessionDuration);
+          delete connectionTimestamps[userId];
+          console.log(`[Uptime] Sessão de ${userId} durou ${sessionDuration.toFixed(2)}s. Estatísticas salvas.`);
+      }
+
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason[statusCode] || 'Desconhecida';
       console.error(`[Sessão ${userId}] Conexão fechada. Razão: ${reason}`);
@@ -400,6 +470,10 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
       }
 
     } else if (connection === 'open') {
+      // NOVO: Registra o momento em que a conexão fica online
+      connectionTimestamps[userId] = Date.now();
+      console.log(`[Uptime] Sessão de ${userId} iniciada.`);
+      
       console.log(`[Sessão ${userId}] Conexão aberta.`);
       await logActivity(userId, 'Bot conectado com sucesso.');
       delete qrCodes[userId];
@@ -409,6 +483,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     await emitDashboardDataForUser(userId);
   });
   
+  // ALTERADO: Lógica de recebimento de mensagens para registrar timestamp do contato
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (msg.key.fromMe || !msg.message) return;
@@ -473,7 +548,8 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         });
     }
 
-    await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview);
+    // O 'true' no final indica que esta é uma mensagem do contato
+    await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview, true);
 
     const config = await getBotConfig(userId);
     if (!config || (!config.useGeminiAI && !config.useCustomResponses)) {
@@ -494,6 +570,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         const transferMessage = 'Tudo bem, um de nossos atendentes irá te ajudar em breve. Por favor, aguarde.';
         await sock.sendMessage(remoteJid, { text: transferMessage });
         await logMessageToTicket(userId, phoneNumber, { text: transferMessage, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
+        await calculateResponseTime(userId, phoneNumber); // Calcula tempo de resposta aqui também
         console.log(`[Bot ${userId}] Pausado para ${phoneNumber} pela palavra-chave.`);
         await logActivity(userId, `Bot pausado para atendimento humano com ${contactName}.`);
         await emitDashboardDataForUser(userId);
@@ -517,6 +594,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
                 await delay(resMsg.delay || 500);
             }
             responseSent = true;
+            await calculateResponseTime(userId, phoneNumber); // Calcula tempo após enviar a sequência
         }
     }
 
@@ -532,6 +610,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         if (aiResponse) {
             await sock.sendMessage(remoteJid, { text: aiResponse });
             await logMessageToTicket(userId, phoneNumber, { text: aiResponse, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
+            await calculateResponseTime(userId, phoneNumber); // Calcula tempo após resposta da IA
         }
     }
   });
@@ -715,7 +794,6 @@ app.get('*', (req, res) => {
 
 // --- INÍCIO DA ROTINA AUTOMÁTICA DE LIMPEZA ---
 
-// INÍCIO DA FUNÇÃO CORRIGIDA
 async function cleanupCompletedTickets() {
     console.log('[CRON] Iniciando a varredura de tickets concluídos para limpeza.');
     try {
@@ -781,7 +859,6 @@ async function cleanupCompletedTickets() {
         console.error('[CRON] Erro GERAL na rotina de limpeza:', error);
     }
 }
-// FIM DA FUNÇÃO CORRIGIDA
 
 cron.schedule('0 23 * * *', () => {
   console.log('[CRON] Disparando a rotina de limpeza automática de mensagens.');

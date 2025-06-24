@@ -12,14 +12,17 @@ export interface MediaInfo {
 export type WhatsAppConnectionStatus = 'offline' | 'connecting_socket' | 'socket_authenticated' | 'initializing' | 'qr_ready' | 'online' | 'auth_failed' | 'disconnected_whatsapp' | 'pairing';
 export interface ActivityLogEntry { message: string; timestamp: string; }
 
-// ALTERADO: Adicionado messagesPending e messagesFailed
+// ALTERADO: Adicionadas as novas métricas
 export interface DashboardData { 
     messagesSent: number; 
     messagesPending: number;
     messagesFailed: number;
     connections: number; 
     botStatus: WhatsAppConnectionStatus; 
-    recentActivity: ActivityLogEntry[]; 
+    recentActivity: ActivityLogEntry[];
+    deliveryRate: number;
+    avgResponseTime: number; // em segundos
+    uptimePercentage: number;
 }
 
 interface WhatsAppState {
@@ -32,7 +35,7 @@ interface WhatsAppState {
 
 const SOCKET_SERVER_URL = 'http://localhost:3001';
 
-// ALTERADO: Adicionado os novos campos ao estado inicial
+// ALTERADO: Adicionados valores iniciais para as novas métricas
 const initialDashboardData: DashboardData = {
     messagesSent: 0,
     messagesPending: 0,
@@ -40,6 +43,9 @@ const initialDashboardData: DashboardData = {
     connections: 0,
     botStatus: 'offline',
     recentActivity: [],
+    deliveryRate: 100,
+    avgResponseTime: 0,
+    uptimePercentage: 100,
 };
 
 export const useWhatsAppConnection = () => {
