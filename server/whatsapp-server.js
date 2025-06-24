@@ -45,7 +45,7 @@ const sessions = {};
 const qrCodes = {};
 const configCache = {};
 const historyCache = {};
-const connectionTimestamps = {}; // NOVO: Para rastrear o tempo de conexão (Uptime)
+const connectionTimestamps = {};
 
 
 const SESSIONS_DIR = path.join(__dirname, 'sessions');
@@ -236,7 +236,6 @@ async function logMessageToTicket(userId, ticketId, messageData) {
     }
 }
 
-// ALTERADO: Adicionado parâmetro 'isContactMessage' para lógica de tempo de resposta
 async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview, isContactMessage = false) {
   try {
     const userDocRef = db.collection('users').doc(userId);
@@ -250,7 +249,6 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
         lastMessageTimestamp: currentTimestamp,
     };
 
-    // NOVO: Se a mensagem for do contato, registra o timestamp para calcular o tempo de resposta depois
     if (isContactMessage) {
         updateData.lastContactMessageTimestamp = currentTimestamp;
     }
@@ -274,7 +272,7 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
         lastMessageTimestamp: currentTimestamp,
         messagePreview,
         botPaused: false,
-        ...(isContactMessage && { lastContactMessageTimestamp: currentTimestamp }) // Adiciona o timestamp se for do contato
+        ...(isContactMessage && { lastContactMessageTimestamp: currentTimestamp })
       };
       await ticketDocRef.set(newTicket);
       await logActivity(userId, `Novo ticket criado para ${contactName || phoneNumber}.`);
@@ -285,7 +283,6 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
   }
 }
 
-// NOVO: Função para calcular o tempo de resposta
 async function calculateResponseTime(userId, phoneNumber) {
     try {
         const ticketRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(phoneNumber);
@@ -293,23 +290,17 @@ async function calculateResponseTime(userId, phoneNumber) {
 
         if (ticketDoc.exists && ticketDoc.data().lastContactMessageTimestamp) {
             const lastContactTime = new Date(ticketDoc.data().lastContactMessageTimestamp);
-            const responseTime = Date.now() - lastContactTime.getTime(); // em ms
+            const responseTime = Date.now() - lastContactTime.getTime();
 
-            // Atualiza as estatísticas no Firestore
             await updateDailyStats(userId, 'totalResponseTime', responseTime);
             await updateDailyStats(userId, 'responseCount', 1);
 
-            // Limpa o timestamp para não contar novamente para a mesma mensagem do contato
             await ticketRef.update({ lastContactMessageTimestamp: admin.firestore.FieldValue.delete() });
         }
     } catch (error) {
         console.error(`[Response Time] Erro ao calcular tempo de resposta para ${phoneNumber}:`, error);
     }
 }
-
-
-// ALTERADO: Função que emite os dados do dashboard agora calcula e envia as novas métricas
-// SUBSTITUA A FUNÇÃO ANTIGA POR ESTA VERSÃO MELHORADA
 
 async function emitDashboardDataForUser(userId) {
     if (!io.sockets.adapter.rooms.get(userId)) return;
@@ -325,30 +316,24 @@ async function emitDashboardDataForUser(userId) {
         const activitySnapshot = await db.collection('users').doc(userId).collection('activity_log').orderBy('timestamp', 'desc').limit(5).get();
         const recentActivity = activitySnapshot.docs.map(doc => doc.data());
 
-        // --- INÍCIO DOS CÁLCULOS DAS MÉTRICAS ---
-
-        // Taxa de Entrega
         const messagesSent = dailyData.messagesSent || 0;
         const messagesFailed = dailyData.messagesFailed || 0;
         const deliveryRate = (messagesSent + messagesFailed) > 0 
             ? (messagesSent / (messagesSent + messagesFailed)) * 100 
             : 100;
 
-        // Tempo Médio de Resposta
         const totalResponseTime = dailyData.totalResponseTime || 0;
         const responseCount = dailyData.responseCount || 0;
-        const avgResponseTime = responseCount > 0 ? (totalResponseTime / responseCount / 1000) : 0; // em segundos
+        const avgResponseTime = responseCount > 0 ? (totalResponseTime / responseCount / 1000) : 0;
 
-        // Uptime (LÓGICA MELHORADA)
-        const savedUptime = dailyData.totalUptime || 0; // Uptime salvo de sessões anteriores
+        const savedUptime = dailyData.totalUptime || 0;
         let currentSessionUptime = 0;
         
-        // Se a sessão está ativa, calcula o tempo de uptime atual em tempo real
         if (connectionTimestamps[userId]) {
-            currentSessionUptime = (Date.now() - connectionTimestamps[userId]) / 1000; // em segundos
+            currentSessionUptime = (Date.now() - connectionTimestamps[userId]) / 1000;
         }
         
-        const totalUptime = savedUptime + currentSessionUptime; // Soma o uptime salvo com o da sessão atual
+        const totalUptime = savedUptime + currentSessionUptime;
 
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -356,8 +341,6 @@ async function emitDashboardDataForUser(userId) {
         const uptimePercentage = secondsSinceStartOfDay > 0 
             ? Math.min((totalUptime / secondsSinceStartOfDay) * 100, 100)
             : 100;
-
-        // --- FIM DOS CÁLCULOS ---
 
         const dashboardPayload = {
             messagesSent: messagesSent,
@@ -427,7 +410,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   sessions[userId] = sock;
   sock.ev.on('creds.update', saveCreds);
 
-  // ALTERADO: Lógica de conexão para registrar Uptime
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     console.log(`[Sessão ${userId}] Status da Conexão: ${connection || 'N/A'}`);
@@ -447,9 +429,8 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     }
     
     if (connection === 'close') {
-      // NOVO: Calcula a duração da sessão online ao desconectar
       if (connectionTimestamps[userId]) {
-          const sessionDuration = (Date.now() - connectionTimestamps[userId]) / 1000; // em segundos
+          const sessionDuration = (Date.now() - connectionTimestamps[userId]) / 1000;
           await updateDailyStats(userId, 'totalUptime', sessionDuration);
           delete connectionTimestamps[userId];
           console.log(`[Uptime] Sessão de ${userId} durou ${sessionDuration.toFixed(2)}s. Estatísticas salvas.`);
@@ -479,7 +460,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
       }
 
     } else if (connection === 'open') {
-      // NOVO: Registra o momento em que a conexão fica online
       connectionTimestamps[userId] = Date.now();
       console.log(`[Uptime] Sessão de ${userId} iniciada.`);
       
@@ -492,7 +472,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
     await emitDashboardDataForUser(userId);
   });
   
-  // ALTERADO: Lógica de recebimento de mensagens para registrar timestamp do contato
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (msg.key.fromMe || !msg.message) return;
@@ -557,7 +536,6 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         });
     }
 
-    // O 'true' no final indica que esta é uma mensagem do contato
     await createOrUpdateKanbanTicket(userId, phoneNumber, contactName, messagePreview, true);
 
     const config = await getBotConfig(userId);
@@ -579,7 +557,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         const transferMessage = 'Tudo bem, um de nossos atendentes irá te ajudar em breve. Por favor, aguarde.';
         await sock.sendMessage(remoteJid, { text: transferMessage });
         await logMessageToTicket(userId, phoneNumber, { text: transferMessage, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
-        await calculateResponseTime(userId, phoneNumber); // Calcula tempo de resposta aqui também
+        await calculateResponseTime(userId, phoneNumber);
         console.log(`[Bot ${userId}] Pausado para ${phoneNumber} pela palavra-chave.`);
         await logActivity(userId, `Bot pausado para atendimento humano com ${contactName}.`);
         await emitDashboardDataForUser(userId);
@@ -603,7 +581,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
                 await delay(resMsg.delay || 500);
             }
             responseSent = true;
-            await calculateResponseTime(userId, phoneNumber); // Calcula tempo após enviar a sequência
+            await calculateResponseTime(userId, phoneNumber);
         }
     }
 
@@ -619,7 +597,7 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
         if (aiResponse) {
             await sock.sendMessage(remoteJid, { text: aiResponse });
             await logMessageToTicket(userId, phoneNumber, { text: aiResponse, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
-            await calculateResponseTime(userId, phoneNumber); // Calcula tempo após resposta da IA
+            await calculateResponseTime(userId, phoneNumber);
         }
     }
   });
@@ -739,6 +717,7 @@ io.on('connection', (socket) => {
       }
   });
   
+  // ALTERADO: Lógica de envio de mensagem para criar um ticket se necessário
   socket.on('send-message', async ({ to, text, media }, callback) => {
     if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
     const sock = sessions[userId];
@@ -748,9 +727,13 @@ io.on('connection', (socket) => {
 
     try {
         await updateDailyStats(userId, 'messagesPending', 1);
-        await emitDashboardDataForUser(userId);
+        
+        const phoneNumber = to.replace(/\D/g, '');
+        const jid = `${phoneNumber}@s.whatsapp.net`;
 
-        const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
+        // GARANTE QUE O TICKET EXISTA NO KANBAN
+        await createOrUpdateKanbanTicket(userId, phoneNumber, phoneNumber, text);
+        await emitDashboardDataForUser(userId);
         
         let messagePayload;
         let logPayload;
@@ -775,13 +758,13 @@ io.on('connection', (socket) => {
         await sock.sendMessage(jid, messagePayload);
         
         await updateDailyStats(userId, 'messagesSent', 1);
-        await logMessageToTicket(userId, to.replace(/\D/g, ''), logPayload);
-        await logActivity(userId, `Mensagem manual enviada para ${to.replace(/\D/g, '')}.`);
+        await logMessageToTicket(userId, phoneNumber, logPayload);
+        await logActivity(userId, `Mensagem manual enviada para ${phoneNumber}.`);
         
         callback({ success: true, message: 'Mensagem enviada com sucesso!' });
 
     } catch (error) {
-        console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
+        console.error(`[Sessão ${userId}] Erro ao enviar mensagem para ${to}:`, error);
         await updateDailyStats(userId, 'messagesFailed', 1);
         callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
 
@@ -800,8 +783,6 @@ io.on('connection', (socket) => {
 app.get('*', (req, res) => {
   res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });
-
-// --- INÍCIO DA ROTINA AUTOMÁTICA DE LIMPEZA ---
 
 async function cleanupCompletedTickets() {
     console.log('[CRON] Iniciando a varredura de tickets concluídos para limpeza.');
@@ -878,9 +859,6 @@ cron.schedule('0 23 * * *', () => {
   scheduled: true,
   timezone: "America/Sao_Paulo"
 });
-
-
-// --- FIM DA ROTINA AUTOMÁTICA DE LIMPEZA ---
 
 
 const PORT = process.env.PORT || 3001;
