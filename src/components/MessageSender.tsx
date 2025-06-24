@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Send, MessageCircle, AlertTriangle, CheckCircle, Paperclip, Image as ImageIcon, XCircle } from 'lucide-react';
+import { Send, MessageCircle, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useWhatsAppConnection, MediaInfo } from '@/hooks/useWhatsAppConnection';
 import { useAuth } from '@/hooks/useAuth';
@@ -145,12 +145,29 @@ const MessageSender = ({ onMessageSent }: MessageSenderProps) => {
     }
 
     try {
-      await sendMessage(phoneNumber, messageText, mediaInfoToSend); 
+      // --- INÍCIO DA ALTERAÇÃO NECESSÁRIA ---
+
+      // 1. Limpa o número de qualquer formatação para obter apenas os dígitos
+      const cleanedNumber = phoneNumber.replace(/\D/g, '');
+
+      let finalNumber;
+      // 2. Verifica se o número limpo já começa com 55 (código do Brasil)
+      if (cleanedNumber.startsWith('55')) {
+          finalNumber = cleanedNumber; // Se sim, usa o número como está
+      } else {
+          finalNumber = '55' + cleanedNumber; // Se não, adiciona o 55 no início
+      }
+      
+      // 3. Usa o número final e corrigido para enviar a mensagem
+      await sendMessage(finalNumber, messageText, mediaInfoToSend);
+      
+      // --- FIM DA ALTERAÇÃO NECESSÁRIA ---
       
       onMessageSent(); 
       toast({
         title: "Mensagem enviada!",
-        description: `Sua mensagem para ${phoneNumber} foi enviada para a fila.`,
+        description: `Sua mensagem para ${finalNumber} foi enviada para a fila.`,
+        variant: "default",
       });
       
       setPhoneNumber('');
@@ -172,16 +189,17 @@ const MessageSender = ({ onMessageSent }: MessageSenderProps) => {
 
   const formatPhoneNumber = (value: string) => {
     const numbers = value.replace(/\D/g, '');
+    
+    // Formato para celular com 9º dígito: (XX) XXXXX-XXXX
     if (numbers.length <= 11) {
-      return numbers.replace(/(\d{2})(\d{0,5})(\d{0,4})/, (match, p1, p2, p3) => {
-        let formatted = '';
-        if (p1) formatted += `(${p1}`;
-        if (p2) formatted += `) ${p2}`;
-        if (p3) formatted += `-${p3}`;
-        return formatted;
-      });
+      return numbers
+        .replace(/(\d{2})/, '($1)')
+        .replace(/(\(\d{2}\))(\d{5})/, '$1 $2')
+        .replace(/(\d{5})-(\d{4})/, '$1$2')
+        .replace(/(\d{4})$/, '-$1');
     }
-    return value.substring(0, 15);
+    // Mantém o valor como está se for maior, para números internacionais
+    return value.substring(0, 15); 
   };
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -222,7 +240,7 @@ const MessageSender = ({ onMessageSent }: MessageSenderProps) => {
           <div className="space-y-4">
             <div>
               <Label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-1">
-                Número do WhatsApp
+                Número do WhatsApp (com DDD)
               </Label>
               <Input
                 id="phoneNumber"
@@ -233,9 +251,6 @@ const MessageSender = ({ onMessageSent }: MessageSenderProps) => {
                 disabled={botStatus === 'offline' || isSending}
                 className="w-full"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Digite o número com DDD.
-              </p>
             </div>
 
             <div>
@@ -281,7 +296,7 @@ const MessageSender = ({ onMessageSent }: MessageSenderProps) => {
                 </Button>
               </div>
             )}
-             {selectedFile && !imagePreview && (
+              {selectedFile && !imagePreview && (
                 <div className="mt-4 p-3 border rounded-md relative bg-gray-100 text-sm flex items-center justify-between">
                     <span>{selectedFile.name}</span>
                     <Button
@@ -295,7 +310,6 @@ const MessageSender = ({ onMessageSent }: MessageSenderProps) => {
                     </Button>
                 </div>
             )}
-
 
             <Button
               onClick={handleSendMessage}
