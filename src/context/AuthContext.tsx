@@ -1,24 +1,27 @@
-import React, { createContext, useState, useEffect, ReactNode, useContext } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+// src/context/AuthContext.tsx
+import React, { createContext, useState, useEffect, ReactNode } from "react";
+import { onAuthStateChanged, User, signOut } from "firebase/auth"; // NOVO: importado o signOut
 import { auth } from "../lib/firebase";
 
 // Interface para o tipo de valor do contexto
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  logout: () => Promise<void>; // NOVO: Adicionada a função logout
 }
 
-// ALTERADO: Agora exportamos o AuthContext para que o hook possa usá-lo
-export const AuthContext = createContext<AuthContextType>({ user: null, loading: true });
-
-// REMOVIDO: O hook `useAuth` não será mais exportado deste arquivo.
+// O contexto agora espera um valor que corresponda à nova interface
+export const AuthContext = createContext<AuthContextType>({ 
+  user: null, 
+  loading: true,
+  logout: () => Promise.resolve(), // valor padrão
+});
 
 // Componente Provedor do Contexto
 interface AuthProviderProps {
   children: ReactNode;
 }
 
-// Voltamos a usar 'export const' para manter a consistência
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,8 +35,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
+  // NOVO: Função de logout que encapsula o signOut do Firebase
+  const logout = async () => {
+    await signOut(auth);
+  };
+
+  // Fornecemos o usuário, o status de loading E a função de logout para os componentes filhos
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, loading, logout }}>
       {children}
     </AuthContext.Provider>
   );
