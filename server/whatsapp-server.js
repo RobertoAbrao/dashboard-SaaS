@@ -15,7 +15,7 @@ const admin = require('firebase-admin');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
-const cron = require('node-cron'); // Importa a biblioteca de agendamento
+const cron = require('node-cron');
 
 
 const MESSAGES_LIMIT = 100;
@@ -197,11 +197,10 @@ async function logActivity(userId, message) {
   }
 }
 
-// ALTERADO: A função agora aceita valores negativos para decremento
 async function updateDailyStats(userId, stat, value = 1) {
     if (!userId || !stat) return;
     try {
-        const today = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+        const today = new Date().toISOString().split('T')[0];
         const statRef = db.collection('users').doc(userId).collection('daily_stats').doc(today);
         await statRef.set({
             [stat]: admin.firestore.FieldValue.increment(value)
@@ -216,8 +215,6 @@ async function logMessageToTicket(userId, ticketId, messageData) {
         const messageCollectionRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(ticketId).collection('messages');
         
         await messageCollectionRef.add(messageData);
-
-        // REMOVIDO: A lógica de contagem foi movida para o handler 'send-message'
         
         delete historyCache[`${userId}-${ticketId}`];
 
@@ -279,7 +276,6 @@ async function createOrUpdateKanbanTicket(userId, phoneNumber, contactName, mess
   }
 }
 
-// ALTERADO: Busca e envia os novos status de mensagem
 async function emitDashboardDataForUser(userId) {
     if (!io.sockets.adapter.rooms.get(userId)) return;
 
@@ -296,8 +292,8 @@ async function emitDashboardDataForUser(userId) {
 
         const dashboardPayload = {
             messagesSent: dailyData.messagesSent || 0,
-            messagesPending: dailyData.messagesPending || 0, // NOVO
-            messagesFailed: dailyData.messagesFailed || 0,   // NOVO
+            messagesPending: dailyData.messagesPending || 0,
+            messagesFailed: dailyData.messagesFailed || 0,
             connections: status === 'online' ? 1 : 0,
             botStatus: status,
             recentActivity: recentActivity,
@@ -416,6 +412,11 @@ async function startWhatsAppSession(userId, phoneNumberForPairing = null) {
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (msg.key.fromMe || !msg.message) return;
+
+    if (msg.message.stickerMessage) {
+        console.log(`[Mídia] Ignorando mensagem de figurinha (sticker) de ${msg.key.remoteJid}`);
+        return;
+    }
 
     const remoteJid = msg.key.remoteJid;
     if (remoteJid.endsWith('@g.us')) return;
@@ -650,7 +651,6 @@ io.on('connection', (socket) => {
       }
   });
   
-  // ALTERADO: Lógica de envio e contagem de status
   socket.on('send-message', async ({ to, text, media }, callback) => {
     if (!userId) return callback({ success: false, message: 'Socket não autenticado.' });
     const sock = sessions[userId];
@@ -660,7 +660,7 @@ io.on('connection', (socket) => {
 
     try {
         await updateDailyStats(userId, 'messagesPending', 1);
-        await emitDashboardDataForUser(userId); // Atualiza o front com o status 'pendente'
+        await emitDashboardDataForUser(userId);
 
         const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
         
@@ -694,12 +694,12 @@ io.on('connection', (socket) => {
 
     } catch (error) {
         console.error(`[Sessão ${userId}] Erro ao enviar mensagem:`, error);
-        await updateDailyStats(userId, 'messagesFailed', 1); // Incrementa falhas
+        await updateDailyStats(userId, 'messagesFailed', 1);
         callback({ success: false, message: error.message || 'Falha ao enviar mensagem.' });
 
     } finally {
-        await updateDailyStats(userId, 'messagesPending', -1); // Decrementa pendentes
-        await emitDashboardDataForUser(userId); // Atualiza o front com o status final
+        await updateDailyStats(userId, 'messagesPending', -1);
+        await emitDashboardDataForUser(userId);
     }
   });
 
@@ -715,62 +715,74 @@ app.get('*', (req, res) => {
 
 // --- INÍCIO DA ROTINA AUTOMÁTICA DE LIMPEZA ---
 
+// INÍCIO DA FUNÇÃO CORRIGIDA
 async function cleanupCompletedTickets() {
-  console.log('[CRON] Iniciando a varredura de tickets concluídos para limpeza.');
-  const usersSnapshot = await db.collection('users').get();
-  
-  if (usersSnapshot.empty) {
-    console.log('[CRON] Nenhum usuário encontrado para verificar.');
-    return;
-  }
+    console.log('[CRON] Iniciando a varredura de tickets concluídos para limpeza.');
+    try {
+        const usersSnapshot = await db.collection('users').get();
 
-  const cleanupPromises = [];
-
-  for (const userDoc of usersSnapshot.docs) {
-    const userId = userDoc.id;
-    console.log(`[CRON] Verificando tickets para o usuário: ${userId}`);
-    
-    const ticketsQuery = db.collection('users').doc(userId).collection('kanban_tickets').where('status', '==', 'completed');
-    const completedTicketsSnapshot = await ticketsQuery.get();
-    
-    if (completedTicketsSnapshot.empty) {
-      console.log(`[CRON] Nenhum ticket concluído para o usuário: ${userId}`);
-      continue;
-    }
-
-    for (const ticketDoc of completedTicketsSnapshot.docs) {
-      const ticketId = ticketDoc.id;
-      const messagesRef = ticketDoc.ref.collection('messages');
-      
-      const cleaningPromise = getDocs(messagesRef).then(async (messagesSnapshot) => {
-        if (messagesSnapshot.empty) {
-          return; // Nenhuma mensagem para limpar
+        if (usersSnapshot.empty) {
+            console.log('[CRON] Nenhum usuário encontrado para verificar.');
+            return;
         }
-        
-        console.log(`[CRON] Limpando ${messagesSnapshot.size} mensagens do ticket ${ticketId} para o usuário ${userId}`);
-        const batch = db.batch();
-        messagesSnapshot.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        
-        await batch.commit();
-        
-        // Atualiza a pré-visualização da mensagem para indicar que foi limpo
-        const today = new Date().toLocaleDateString('pt-BR');
-        await ticketDoc.ref.update({ messagePreview: `Histórico limpo em ${today}` });
-      }).catch(error => {
-        console.error(`[CRON] Erro ao limpar mensagens do ticket ${ticketId}:`, error);
-      });
-      
-      cleanupPromises.push(cleaningPromise);
+
+        const cleanupPromises = [];
+
+        for (const userDoc of usersSnapshot.docs) {
+            const userId = userDoc.id;
+            console.log(`[CRON] Verificando tickets para o usuário: ${userId}`);
+
+            const ticketsQuery = db.collection('users').doc(userId).collection('kanban_tickets').where('status', '==', 'completed');
+            const completedTicketsSnapshot = await ticketsQuery.get();
+
+            if (completedTicketsSnapshot.empty) {
+                console.log(`[CRON] Nenhum ticket concluído para o usuário: ${userId}`);
+                continue;
+            }
+
+            for (const ticketDoc of completedTicketsSnapshot.docs) {
+                const ticketId = ticketDoc.id;
+                
+                const cleanupPromise = (async () => {
+                    try {
+                        const messagesRef = ticketDoc.ref.collection('messages');
+                        const messagesSnapshot = await messagesRef.get();
+
+                        if (messagesSnapshot.empty) {
+                            console.log(`[CRON] Ticket ${ticketId} já está limpo. Pulando.`);
+                            return;
+                        }
+
+                        console.log(`[CRON] Limpando ${messagesSnapshot.size} mensagens do ticket ${ticketId} para o usuário ${userId}`);
+                        const batch = db.batch();
+                        
+                        messagesSnapshot.docs.forEach(doc => {
+                            batch.delete(doc.ref);
+                        });
+
+                        await batch.commit();
+
+                        const today = new Date().toLocaleDateString('pt-BR');
+                        await ticketDoc.ref.update({ messagePreview: `Histórico limpo em ${today}` });
+                        console.log(`[CRON] Sucesso ao limpar ticket ${ticketId}.`);
+                    } catch (error) {
+                        console.error(`[CRON] Erro ao processar o ticket ${ticketId} para o usuário ${userId}:`, error);
+                    }
+                })();
+
+                cleanupPromises.push(cleanupPromise);
+            }
+        }
+
+        await Promise.all(cleanupPromises);
+        console.log('[CRON] Limpeza diária de tickets concluídos finalizada.');
+
+    } catch (error) {
+        console.error('[CRON] Erro GERAL na rotina de limpeza:', error);
     }
-  }
-
-  await Promise.all(cleanupPromises);
-  console.log('[CRON] Limpeza diária de tickets concluídos finalizada.');
 }
+// FIM DA FUNÇÃO CORRIGIDA
 
-// Agenda a tarefa para ser executada todos os dias às 23:00h
 cron.schedule('0 23 * * *', () => {
   console.log('[CRON] Disparando a rotina de limpeza automática de mensagens.');
   cleanupCompletedTickets().catch(error => {
