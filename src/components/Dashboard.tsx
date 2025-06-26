@@ -4,7 +4,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { TrendingUp, Clock, AlertTriangle, Activity as ActivityIcon, CheckCircle, Wifi, Zap } from 'lucide-react';
 import type { ActivityLogEntry, WhatsAppConnectionStatus } from '@/hooks/useWhatsAppConnection';
 
-// ALTERADO: Interface de props atualizada com as novas métricas
 interface DashboardProps {
   messagesSent: number;
   messagesPending: number;
@@ -17,7 +16,6 @@ interface DashboardProps {
   uptimePercentage: number;
 }
 
-// Dados fictícios para os gráficos que ainda não são dinâmicos
 const messageDataPlaceholder = [
   { time: '00:00', messages: 0 }, { time: '04:00', messages: 0 },
   { time: '08:00', messages: 0 }, { time: '12:00', messages: 0 },
@@ -119,8 +117,9 @@ const Dashboard = ({
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* ALTERAÇÃO 1: Adicionando margem ao container do gráfico */}
             <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
+              <PieChart margin={{ top: 0, right: 40, bottom: 0, left: 40 }}>
                 <Pie 
                   data={statusPieData} 
                   cx="50%" 
@@ -130,7 +129,11 @@ const Dashboard = ({
                   paddingAngle={5} 
                   dataKey="value" 
                   labelLine={false} 
-                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                  // ALTERAÇÃO 2: Lógica para não mostrar o rótulo se o valor for zero
+                  label={({ name, value, percent }) => {
+                    if (value === 0) return null;
+                    return `${name} ${((percent ?? 0) * 100).toFixed(0)}%`;
+                  }}
                 >
                   {statusPieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -188,7 +191,6 @@ const Dashboard = ({
         </Card>
       </div>
 
-      {/* ALTERADO: Card de Métricas de Performance agora usa dados reais */}
       <Card>
         <CardHeader>
           <CardTitle>Métricas de Performance</CardTitle>
