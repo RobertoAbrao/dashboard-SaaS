@@ -1,8 +1,10 @@
+// src/pages/Index.tsx
 import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, BarChart3, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut } from 'lucide-react'; // Importar LogOut
+// ALTERADO: Adicionado o ícone 'Wifi' e removido 'BarChart3' que não será mais usado aqui
+import { QrCode, MessageCircle, Activity, Settings, Send, Smartphone, Users, Wifi, KeyRound, FileText, Brain, Loader2, ListTodo, PlusCircle, Trash2, XCircle, Handshake, LogOut, AlertTriangle, CircleUser, BarChart3 } from 'lucide-react';
 import QRCodeSection from '@/components/QRCodeSection';
 import MessageSender from '@/components/MessageSender';
 import BotStatus from '@/components/BotStatus';
@@ -13,7 +15,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/components/ui/use-toast";
 import KanbanBoard from '@/components/KanbanBoard';
 import { Switch } from '@/components/ui/switch';
-import { useNavigate } from 'react-router-dom'; // Importar useNavigate
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
 
 interface BotConfig {
   geminiApiKey: string;
@@ -33,9 +45,10 @@ interface ResponseMessage {
 }
 
 const Index = () => {
-  const { status: currentStatus, dashboardData, message: hookMessage, socketRef } = useWhatsAppConnection();
+  const { status: currentStatus, dashboardData, socketRef } = useWhatsAppConnection();
   const { toast } = useToast();
-  const navigate = useNavigate(); // Inicializar useNavigate
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -49,15 +62,12 @@ const Index = () => {
   const [pauseBotKeyword, setPauseBotKeyword] = useState<string>('');
 
   useEffect(() => {
-    // Captura o valor atual do socketRef.current no início do efeito
     const currentSocket = socketRef.current;
 
     if (currentSocket && currentSocket.connected) {
       const fetchConfig = () => {
-        console.log("Solicitando configurações do bot do servidor...");
         currentSocket.emit('get_bot_config', (response: { success: boolean, data?: Partial<BotConfig> & { faqFilename?: string }, message?: string }) => {
           if (response.success && response.data) {
-            console.log("Configurações recebidas:", response.data);
             setGeminiApiKey(response.data.geminiApiKey || '');
             setSystemPrompt(response.data.systemPrompt || 'Você é um assistente prestativo.');
             if (response.data.faqFilename) {
@@ -74,12 +84,11 @@ const Index = () => {
         });
       };
 
-      if (currentStatus === 'socket_connected' || currentStatus === 'online') {
+      if (currentStatus === 'socket_authenticated' || currentStatus === 'online') {
         fetchConfig();
       } else {
         const handleReady = () => fetchConfig();
         currentSocket.on('ready', handleReady);
-        // A função de limpeza agora usa a variável capturada 'currentSocket'
         return () => {
           if (currentSocket) {
             currentSocket.off('ready', handleReady);
@@ -114,10 +123,7 @@ const Index = () => {
       toast({ title: "Erro de Conexão", description: "Não foi possível conectar ao servidor para salvar.", variant: "destructive" });
       return;
     }
-    if (!useGeminiAI && !useCustomResponses) {
-        toast({ title: "Modo de Atendimento", description: "Pelo menos um modo de atendimento (IA ou Respostas Personalizadas) deve estar ativo.", variant: "destructive" });
-        return;
-    }
+
     if (useGeminiAI && !geminiApiKey) {
       toast({ title: "API Key Faltando", description: "Por favor, insira a API Key do Gemini.", variant: "destructive" });
       return;
@@ -144,7 +150,6 @@ const Index = () => {
       }
     }
 
-
     setIsSavingConfig(true);
     let faqTextContent = '';
     if (faqFile) {
@@ -169,8 +174,6 @@ const Index = () => {
       pauseBotKeyword,
     };
 
-    console.log("Enviando para salvar config:", configToSave);
-
     socketRef.current.emit('save_bot_config', configToSave, (response: { success: boolean, message: string }) => {
       setIsSavingConfig(false);
       if (response.success) {
@@ -181,7 +184,6 @@ const Index = () => {
     });
   };
 
-  // customResponses foi removido das dependências, pois a atualização é funcional
   const handleAddOption = useCallback(() => {
     setCustomResponses(prev => {
       const existingKeys = Object.keys(prev);
@@ -209,7 +211,7 @@ const Index = () => {
 
       return newState;
     });
-  }, []); // customResponses removido daqui
+  }, []);
 
 
   const handleRemoveOption = useCallback((keyToRemove: string) => {
@@ -275,7 +277,6 @@ const Index = () => {
     }));
   }, []);
 
-
   const botDisplayStatus: WhatsAppConnectionStatus = dashboardData.botStatus || currentStatus;
 
   const getStatusValue = (statusValue: WhatsAppConnectionStatus) => {
@@ -283,9 +284,8 @@ const Index = () => {
       case 'online': return 'Online';
       case 'qr_ready': return 'Aguardando QR';
       case 'initializing':
-      case 'socket_connected':
-      case 'connecting_socket':
-      case 'authenticated': return 'Conectando';
+      case 'socket_authenticated':
+      case 'connecting_socket': return 'Conectando';
       case 'auth_failed': return 'Falha';
       case 'disconnected_whatsapp': return 'Desconectado';
       default: return 'Offline';
@@ -297,15 +297,15 @@ const Index = () => {
       case 'online': return { color: 'text-green-600', bgColor: 'bg-green-50' };
       case 'qr_ready': return { color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
       case 'initializing':
-      case 'socket_connected':
-      case 'connecting_socket':
-      case 'authenticated': return { color: 'text-blue-600', bgColor: 'bg-blue-50' };
+      case 'socket_authenticated':
+      case 'connecting_socket': return { color: 'text-blue-600', bgColor: 'bg-blue-50' };
       case 'auth_failed':
       case 'disconnected_whatsapp': return { color: 'text-red-600', bgColor: 'bg-red-50' };
       default: return { color: 'text-gray-600', bgColor: 'bg-gray-50' };
     }
   };
 
+  // ALTERADO: A constante 'stats' agora usa os dados reais do dashboardData
   const stats = [
     {
       title: "Status do Bot",
@@ -315,35 +315,44 @@ const Index = () => {
       bgColor: getStatusColors(botDisplayStatus).bgColor,
     },
     {
-      title: "Mensagens Enviadas Hoje",
+      title: "Mensagens Hoje",
       value: dashboardData.messagesSent.toString(),
       icon: MessageCircle,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50'
     },
     {
-      title: "Conexões Ativas",
-      value: dashboardData.connections.toString(),
-      icon: Users,
+      title: "Taxa de Entrega",
+      value: `${dashboardData.deliveryRate.toFixed(1)}%`,
+      icon: Users, // Pode trocar por um ícone melhor, como CheckCircle
       color: 'text-purple-600',
       bgColor: 'bg-purple-50'
     },
     {
-      title: "Uptime (Placeholder)",
-      value: "99.9%",
-      icon: BarChart3,
-      color: 'text-indigo-600',
-      bgColor: 'bg-indigo-50'
+      title: "Uptime Hoje",
+      value: `${dashboardData.uptimePercentage.toFixed(1)}%`,
+      icon: Wifi, // Usando o novo ícone
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50'
     }
   ];
 
-  const handleLogout = () => {
-    localStorage.removeItem('authToken'); // Remove o token
-    navigate('/login'); // Redireciona para a página de login
-    toast({
-      title: "Logout realizado",
-      description: "Você foi desconectado com sucesso.",
-    });
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+      toast({
+        title: "Logout realizado",
+        description: "Você foi desconectado com sucesso.",
+      });
+    } catch (error) {
+       console.error("Erro ao fazer logout:", error);
+       toast({
+        title: "Erro",
+        description: "Ocorreu um erro ao tentar fazer logout.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -360,12 +369,27 @@ const Index = () => {
                 <p className="text-sm text-gray-500">Automação profissional para WhatsApp</p>
               </div>
             </div>
-            <div className="flex items-center space-x-4"> {/* Adicionado um contêiner flexível para status e botão */}
+            <div className="flex items-center space-x-4">
               <BotStatus />
-              <Button onClick={handleLogout} variant="outline" className="flex items-center space-x-2">
-                <LogOut className="h-4 w-4" />
-                <span>Logout</span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" className="rounded-full h-9 w-9">
+                    <CircleUser className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {user?.email && (
+                    <>
+                      <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  <DropdownMenuItem onClick={handleLogout} className="flex items-center gap-2 cursor-pointer text-sm">
+                    <LogOut className="h-4 w-4" />
+                    <span>Sair</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -417,9 +441,14 @@ const Index = () => {
           <TabsContent value="dashboard">
             <Dashboard
               messagesSent={dashboardData.messagesSent}
+              messagesPending={dashboardData.messagesPending}
+              messagesFailed={dashboardData.messagesFailed}
               connections={dashboardData.connections}
               botStatus={dashboardData.botStatus}
               recentActivityData={dashboardData.recentActivity}
+              deliveryRate={dashboardData.deliveryRate}
+              avgResponseTime={dashboardData.avgResponseTime}
+              uptimePercentage={dashboardData.uptimePercentage}
             />
           </TabsContent>
           <TabsContent value="qrcode"> <QRCodeSection /> </TabsContent>
@@ -443,11 +472,19 @@ const Index = () => {
                   <span>Configurações do Bot Inteligente e Respostas</span>
                 </CardTitle>
                 <CardDescription>
-                  Personalize o comportamento e a base de conhecimento do seu assistente.
+                  Personalize o comportamento e a base de conhecimento do seu assistente. Ative apenas um modo por vez.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Seção de Ativação/Desativação da IA */}
+                {!useGeminiAI && !useCustomResponses && (
+                    <div className="p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 border border-yellow-200 flex items-center gap-3">
+                        <AlertTriangle className="h-5 w-5"/>
+                        <div>
+                            <span className="font-semibold">Modo de Atendimento Manual Ativado.</span> Nenhuma resposta automática será enviada pelo bot.
+                        </div>
+                    </div>
+                )}
+
                 <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center space-x-3">
                         <Brain className="h-5 w-5 text-purple-600" />
@@ -522,7 +559,6 @@ const Index = () => {
                     </>
                 )}
 
-                {/* Seção de Respostas Personalizadas */}
                 <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center space-x-3">
                         <ListTodo className="h-5 w-5 text-blue-600" />
@@ -561,7 +597,6 @@ const Index = () => {
                             Defina palavras-chave (ex: "1", "menu", "horário") e as mensagens que o bot deve enviar em resposta.
                         </p>
 
-                        {/* Campo para configurar a palavra-chave que pausa o bot */}
                         <div className="space-y-2 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
                           <label htmlFor="pauseBotKeyword" className="flex items-center text-sm font-medium text-gray-700">
                               <Handshake className="h-4 w-4 mr-2 text-yellow-600" />
@@ -650,7 +685,6 @@ const Index = () => {
                         ))}
                     </div>
                 )}
-
 
                 <div className="flex justify-end pt-4">
                   <Button

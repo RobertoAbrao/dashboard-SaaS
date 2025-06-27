@@ -1,17 +1,21 @@
 // src/components/Dashboard.tsx
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, Clock, AlertTriangle, Activity as ActivityIcon } from 'lucide-react';
+import { TrendingUp, Clock, AlertTriangle, Activity as ActivityIcon, CheckCircle, Wifi, Zap } from 'lucide-react';
 import type { ActivityLogEntry, WhatsAppConnectionStatus } from '@/hooks/useWhatsAppConnection';
 
 interface DashboardProps {
   messagesSent: number;
+  messagesPending: number;
+  messagesFailed: number;
   connections: number;
   botStatus: WhatsAppConnectionStatus;
   recentActivityData: ActivityLogEntry[];
+  deliveryRate: number;
+  avgResponseTime: number; // em segundos
+  uptimePercentage: number;
 }
 
-// Dados fictícios para os gráficos que ainda não vêm do Redis
 const messageDataPlaceholder = [
   { time: '00:00', messages: 0 }, { time: '04:00', messages: 0 },
   { time: '08:00', messages: 0 }, { time: '12:00', messages: 0 },
@@ -24,14 +28,22 @@ const dailyDataPlaceholder = [
   { day: 'Dom', messages: 0 },
 ];
 
-const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }: DashboardProps) => {
+const Dashboard = ({ 
+  messagesSent, 
+  messagesPending, 
+  messagesFailed, 
+  recentActivityData,
+  deliveryRate,
+  avgResponseTime,
+  uptimePercentage
+ }: DashboardProps) => {
   
-  const totalMessagesForPie = messagesSent > 0 ? messagesSent : 1; // Avoid division by zero if messagesSent is 0
+  const totalMessagesForPie = messagesSent + messagesPending + messagesFailed || 1;
 
   const statusPieData = [
     { name: 'Enviadas', value: messagesSent, color: '#10B981' },
-    { name: 'Pendentes (Exemplo)', value: Math.max(0, Math.floor(messagesSent * 0.05)), color: '#F59E0B' },
-    { name: 'Falhas (Exemplo)', value: Math.max(0, Math.floor(messagesSent * 0.02)), color: '#EF4444' },
+    { name: 'Pendentes', value: messagesPending, color: '#F59E0B' },
+    { name: 'Falhas', value: messagesFailed, color: '#EF4444' },
   ];
 
   const formattedRecentActivity = recentActivityData.map(log => {
@@ -51,7 +63,6 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }:
 
   return (
     <div className="space-y-6">
-      {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -100,14 +111,15 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }:
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Status das Mensagens (Exemplo)</CardTitle>
+            <CardTitle>Status das Mensagens</CardTitle>
             <CardDescription>
-              Distribuição do status das mensagens enviadas (baseado no total enviado)
+              Distribuição do status das mensagens enviadas hoje.
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* ALTERAÇÃO 1: Adicionando margem ao container do gráfico */}
             <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
+              <PieChart margin={{ top: 0, right: 40, bottom: 0, left: 40 }}>
                 <Pie 
                   data={statusPieData} 
                   cx="50%" 
@@ -117,7 +129,11 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }:
                   paddingAngle={5} 
                   dataKey="value" 
                   labelLine={false} 
-                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}  // CORRIGIDO AQUI
+                  // ALTERAÇÃO 2: Lógica para não mostrar o rótulo se o valor for zero
+                  label={({ name, value, percent }) => {
+                    if (value === 0) return null;
+                    return `${name} ${((percent ?? 0) * 100).toFixed(0)}%`;
+                  }}
                 >
                   {statusPieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -179,27 +195,36 @@ const Dashboard = ({ messagesSent, connections, botStatus, recentActivityData }:
         <CardHeader>
           <CardTitle>Métricas de Performance</CardTitle>
           <CardDescription>
-            Indicadores de desempenho do seu bot WhatsApp
+            Indicadores de desempenho do seu bot WhatsApp no dia de hoje
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-green-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-green-600">98.5%</div>
-              <div className="text-sm text-green-800">Taxa de Entrega (Exemplo)</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            
+            <div className="bg-green-50 p-4 rounded-lg flex flex-col items-center justify-center">
+              <CheckCircle className="h-6 w-6 text-green-600 mb-2"/>
+              <div className="text-2xl font-bold text-green-800">{deliveryRate.toFixed(1)}%</div>
+              <div className="text-sm font-medium text-green-700">Taxa de Entrega</div>
             </div>
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">1.2s</div>
-              <div className="text-sm text-blue-800">Tempo Médio Resposta (Exemplo)</div>
+
+            <div className="bg-blue-50 p-4 rounded-lg flex flex-col items-center justify-center">
+               <Clock className="h-6 w-6 text-blue-600 mb-2"/>
+              <div className="text-2xl font-bold text-blue-800">{avgResponseTime.toFixed(1)}s</div>
+              <div className="text-sm font-medium text-blue-700">Tempo de Resposta</div>
             </div>
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-purple-600">{messagesSent}</div>
-              <div className="text-sm text-purple-800">Mensagens Hoje</div>
+
+            <div className="bg-purple-50 p-4 rounded-lg flex flex-col items-center justify-center">
+               <Zap className="h-6 w-6 text-purple-600 mb-2"/>
+              <div className="text-2xl font-bold text-purple-800">{messagesSent}</div>
+              <div className="text-sm font-medium text-purple-700">Mensagens Hoje</div>
             </div>
-            <div className="bg-orange-50 p-4 rounded-lg">
-              <div className="text-2xl font-bold text-orange-600">99.2%</div>
-              <div className="text-sm text-orange-800">Uptime (Exemplo)</div>
+
+            <div className="bg-orange-50 p-4 rounded-lg flex flex-col items-center justify-center">
+              <Wifi className="h-6 w-6 text-orange-600 mb-2"/>
+              <div className="text-2xl font-bold text-orange-800">{uptimePercentage.toFixed(1)}%</div>
+              <div className="text-sm font-medium text-orange-700">Uptime</div>
             </div>
+
           </div>
         </CardContent>
       </Card>
