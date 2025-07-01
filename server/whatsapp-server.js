@@ -62,6 +62,19 @@ app.use(express.json());
 app.use(express.static(frontendBuildPath));
 app.use('/media', express.static(MEDIA_DIR));
 
+// ===================================================================
+// NOVA ROTA DE PING - Adicione este bloco
+app.get('/ping', (req, res) => {
+    console.log('Ping recebido! O servidor está ativo.');
+    res.status(200).send('Pong!');
+});
+// ===================================================================
+
+// Rota de Teste da API
+app.get('/api/test', (req, res) => {
+    res.send('Olá do servidor!');
+});
+
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         const userId = req.user?.uid;
