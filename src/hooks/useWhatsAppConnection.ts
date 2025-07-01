@@ -33,7 +33,9 @@ interface WhatsAppState {
   dashboardData: DashboardData;
 }
 
-const SOCKET_SERVER_URL = 'http://localhost:3001';
+//const SOCKET_SERVER_URL = 'http://localhost:3001';
+// Linha modificada
+const SOCKET_SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // ALTERADO: Adicionados valores iniciais para as novas métricas
 const initialDashboardData: DashboardData = {
