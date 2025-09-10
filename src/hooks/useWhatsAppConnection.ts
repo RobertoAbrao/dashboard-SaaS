@@ -33,9 +33,8 @@ interface WhatsAppState {
   dashboardData: DashboardData;
 }
 
-//const SOCKET_SERVER_URL = 'http://localhost:3001';
-// Linha modificada
-const SOCKET_SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const SOCKET_SERVER_URL = API_BASE_URL;
 
 // ALTERADO: Adicionados valores iniciais para as novas métricas
 const initialDashboardData: DashboardData = {
@@ -107,26 +106,36 @@ export const useWhatsAppConnection = () => {
 
   const restartConnection = useCallback(async () => {
     if (!user) return;
-    setWhatsAppState(prev => ({...prev, status: 'initializing'}));
+    setWhatsAppState(prev => ({...prev, status: 'initializing', message: 'Iniciando conexão...'}));
     const token = await user.getIdToken();
-    await fetch('http://localhost:3001/api/whatsapp/connect', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    try {
+      await fetch(`${API_BASE_URL}/api/whatsapp/connect`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+      });
+    } catch (error) {
+      console.error("Erro ao reiniciar conexão:", error);
+      setWhatsAppState(prev => ({...prev, status: 'offline', message: 'Falha ao conectar com o servidor.'}));
+    }
   }, [user]);
 
   const requestPairingCode = useCallback(async (phoneNumber: string) => {
     if (!user) return;
     setWhatsAppState(prev => ({...prev, status: 'initializing', message: 'Gerando código...'}));
     const token = await user.getIdToken();
-    await fetch('http://localhost:3001/api/whatsapp/request-pairing-code', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ phoneNumber })
-    });
+    try {
+      await fetch(`${API_BASE_URL}/api/whatsapp/request-pairing-code`, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ phoneNumber })
+      });
+    } catch (error) {
+        console.error("Erro ao solicitar pairing code:", error);
+        setWhatsAppState(prev => ({...prev, status: 'offline', message: 'Falha ao solicitar código de pareamento.'}));
+    }
   }, [user]);
 
   const sendMessage = useCallback(async (phoneNumber: string, text: string, mediaInfo?: MediaInfo) => {

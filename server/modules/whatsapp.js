@@ -37,18 +37,25 @@ const getFileExtension = (mediaType) => {
 async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
   const sessionFolderPath = path.join(SESSIONS_DIR, userId);
 
+  // Se já existe uma sessão para este usuário, desconecte-a primeiro.
   if (sessions[userId]) {
     try {
       await sessions[userId].logout();
+      console.log(`[Sessão ${userId}] Sessão antiga desconectada com sucesso.`);
     } catch (e) {
-      console.warn(`[Sessão ${userId}] Erro ao deslogar sessão antiga.`, e.message);
+      console.warn(`[Sessão ${userId}] Erro ao deslogar sessão antiga, mas continuando.`, e.message);
     } finally {
       delete sessions[userId];
     }
   }
 
-  if (phoneNumberForPairing && fs.existsSync(sessionFolderPath)) {
-    fs.rmSync(sessionFolderPath, { recursive: true, force: true });
+  // Se não estamos usando pareamento por código (ou seja, queremos um QR code)
+  // ou se estamos trocando para o modo de pareamento, limpamos a pasta da sessão antiga.
+  if (!phoneNumberForPairing || (phoneNumberForPairing && fs.existsSync(sessionFolderPath))) {
+    if (fs.existsSync(sessionFolderPath)) {
+        fs.rmSync(sessionFolderPath, { recursive: true, force: true });
+        console.log(`[Sessão ${userId}] Pasta de sessão antiga removida para garantir um início limpo.`);
+    }
   }
   
   const { state, saveCreds } = await useMultiFileAuthState(sessionFolderPath);
@@ -59,6 +66,9 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
     browser: ['Abrão Tech', 'Chrome', '1.0.0'],
     connectTimeoutMs: 60_000,
     syncFullHistory: true, 
+    // Adicionado para tentar resolver problemas de conexão em algumas redes
+    shouldIgnoreJid: jid => jid.includes('@g.us'), // Ignora grupos
+    qrTimeout: 30000, // Aumenta o timeout do QR
   });
 
   sessions[userId] = sock;
@@ -66,19 +76,14 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    // Adicionado log detalhado para depuração
+    console.log(`[Sessão ${userId}] Connection Update:`, JSON.stringify(update, null, 2));
 
-    if (qr) {
-      if (phoneNumberForPairing) {
-        try {
-          const code = await sock.requestPairingCode(phoneNumberForPairing);
-          io.to(userId).emit('pairing_code', code);
-        } catch (error) {
-          io.to(userId).emit('error', 'Falha ao gerar o código. Tente usar o QR Code.');
-        }
-      } else {
+    if (qr && !phoneNumberForPairing) {
+        // Apenas emite QR se não estivermos no fluxo de pairing code
         qrCodes[userId] = qr;
         io.to(userId).emit('qr', qr);
-      }
+        console.log(`[Sessão ${userId}] QR Code emitido para o cliente.`);
     }
     
     if (connection === 'close') {
@@ -90,6 +95,7 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
 
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason[statusCode] || 'Desconhecida';
+      console.error(`[Sessão ${userId}] Conexão perdida. Razão: ${reason}`, lastDisconnect?.error);
       await logActivity(userId, `Conexão perdida. Razão: ${reason}`);
       
       delete sessions[userId];
@@ -97,10 +103,12 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
       
       if (statusCode !== DisconnectReason.loggedOut) {
            setTimeout(() => {
+                console.log(`[Sessão ${userId}] Tentando reconexão automática...`);
                 startWhatsAppSession(io, userId, null).catch(err => console.error(`[Sessão ${userId}] Erro na reconexão automática:`, err));
            }, 15000);
            io.to(userId).emit('disconnected', `Conexão perdida. Reconectando...`);
       } else {
+          console.log(`[Sessão ${userId}] Sessão encerrada (logout).`);
           await logActivity(userId, `Sessão encerrada (logout).`);
           if (fs.existsSync(sessionFolderPath)) {
               fs.rmSync(sessionFolderPath, { recursive: true, force: true });
@@ -108,14 +116,33 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
           io.to(userId).emit('disconnected', `Sessão encerrada permanentemente.`);
       }
     } else if (connection === 'open') {
+      console.log(`[Sessão ${userId}] Conexão estabelecida com sucesso.`);
       connectionTimestamps[userId] = Date.now();
       await logActivity(userId, 'Bot conectado com sucesso.');
-      delete qrCodes[userId];
+      delete qrCodes[userId]; // Limpa o QR code pois não é mais necessário
       io.to(userId).emit('ready');
     }
     
     await emitDashboardDataForUser(io, userId);
   });
+  
+  // A lógica de pairing code é tratada separadamente para maior clareza.
+  if (phoneNumberForPairing) {
+    try {
+      console.log(`[Sessão ${userId}] Solicitando código de pareamento para o número: ${phoneNumberForPairing}`);
+      const code = await sock.requestPairingCode(phoneNumberForPairing);
+      console.log(`[Sessão ${userId}] Código de pareamento gerado: ${code}`);
+      io.to(userId).emit('pairing_code', code);
+    } catch (error) {
+      console.error(`[Sessão ${userId}] Falha crítica ao gerar código de pareamento:`, error);
+      io.to(userId).emit('error', 'Falha ao gerar o código. Verifique o número e tente novamente.');
+      // Encerra a sessão com falha para permitir uma nova tentativa limpa.
+      if (sessions[userId]) {
+        try { await sessions[userId].logout(); } catch {}
+        delete sessions[userId];
+      }
+    }
+  }
   
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
@@ -176,12 +203,42 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
 
     const ticketRef = db.collection('users').doc(userId).collection('kanban_tickets').doc(phoneNumber);
     const ticketDoc = await ticketRef.get();
-    if (ticketDoc.exists && ticketDoc.data().botPaused) return;
+    const ticketData = ticketDoc.exists ? ticketDoc.data() : {};
+
+    // Verifica se o dono do bot enviou um comando para pausar ou reativar
+    if (msg.key.fromMe) {
+        const ownerPauseKeyword = config.ownerPauseKeyword?.trim().toLowerCase();
+        const ownerResumeKeyword = config.ownerResumeKeyword?.trim().toLowerCase();
+
+        if (ownerPauseKeyword && messageContent.toLowerCase() === ownerPauseKeyword) {
+            await ticketRef.set({ botPaused: true }, { merge: true });
+            await logActivity(userId, `Bot pausado manualmente para ${contactName}.`);
+            await emitDashboardDataForUser(io, userId);
+            // Opcional: enviar uma confirmação para si mesmo
+            // await sock.sendMessage(remoteJid, { text: `Bot pausado para ${contactName}.` });
+            return; 
+        }
+
+        if (ownerResumeKeyword && messageContent.toLowerCase() === ownerResumeKeyword) {
+            await ticketRef.set({ botPaused: false }, { merge: true });
+            await logActivity(userId, `Bot reativado manualmente para ${contactName}.`);
+            await emitDashboardDataForUser(io, userId);
+            // Opcional: enviar uma confirmação para si mesmo
+            // await sock.sendMessage(remoteJid, { text: `Bot reativado para ${contactName}.` });
+            return;
+        }
+    }
+
+    // Se o bot estiver pausado para este ticket, não faz nada.
+    if (ticketData.botPaused) {
+        console.log(`[Sessão ${userId}] Bot pausado para ${contactName}, ignorando mensagem.`);
+        return;
+    }
 
     const pauseKeyword = config.pauseBotKeyword?.trim().toLowerCase();
     if (pauseKeyword && messageContent.toLowerCase() === pauseKeyword) {
-        await ticketRef.update({ botPaused: true });
-        const transferMessage = 'Tudo bem, um de nossos atendentes irá te ajudar em breve. Por favor, aguarde.';
+        await ticketRef.set({ botPaused: true }, { merge: true });
+        const transferMessage = config.transferMessage || 'Tudo bem, um de nossos atendentes irá te ajudar em breve. Por favor, aguarde.';
         await sock.sendMessage(remoteJid, { text: transferMessage });
         await logMessageToTicket(userId, phoneNumber, { text: transferMessage, sender: 'user', timestamp: new Date().toISOString(), type: 'text' });
         await calculateResponseTime(userId, phoneNumber);
