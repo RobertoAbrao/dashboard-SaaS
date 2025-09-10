@@ -63,9 +63,8 @@ async function startWhatsAppSession(io, userId, phoneNumberForPairing = null) {
   const sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' }),
-    browser: ['Abrão Tech', 'Chrome', '1.0.0'],
     connectTimeoutMs: 60_000,
-    syncFullHistory: true, 
+    syncFullHistory: false, 
     // Adicionado para tentar resolver problemas de conexão em algumas redes
     shouldIgnoreJid: jid => jid.includes('@g.us'), // Ignora grupos
     qrTimeout: 30000, // Aumenta o timeout do QR
